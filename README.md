@@ -24,7 +24,7 @@
 
 ## 快速开始 / Quick Start
 
-1. 下载 [openfences.exe](https://github.com/zw/openFences/releases)（最新 Release）
+1. 下载 [openfences.exe](https://github.com/weiweigogo/openFrence/releases)（最新 Release）
 2. 放到任意目录，双击运行
 3. 右键右下角托盘图标 → 设置语言、开机自启、创建桌面快捷方式
 4. 在桌面上拖拽图标到围栏中即可
