@@ -1,0 +1,10 @@
+# CMake generation dependency list for this directory.
+D:/cMake/share/cmake-4.1/Modules/CMakePackageConfigHelpers.cmake
+D:/cMake/share/cmake-4.1/Modules/ExternalProject.cmake
+D:/cMake/share/cmake-4.1/Modules/ExternalProject/shared_internal_commands.cmake
+D:/cMake/share/cmake-4.1/Modules/GNUInstallDirs.cmake
+D:/cMake/share/cmake-4.1/Modules/WriteBasicConfigVersionFile.cmake
+D:/person/openFences/cpp/build/_deps/json-src/CMakeLists.txt
+D:/person/openFences/cpp/build/_deps/json-src/cmake/config.cmake.in
+D:/person/openFences/cpp/build/_deps/json-src/cmake/nlohmann_jsonConfigVersion.cmake.in
+D:/person/openFences/cpp/build/_deps/json-src/cmake/pkg-config.pc.in

@@ -1,0 +1,290 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B23F0E80-850E-3B0F-AD9F-62B2696FC7D7}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>json-populate</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v141</PlatformToolset>
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-mkdir.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Creating directories for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\cMake\bin\cmake.exe -Dcfgdir=/Debug -P D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/tmp/json-populate-mkdirs.cmake
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-mkdir
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-mkdir</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-download.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Performing download step (download, verify and extract) for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\person\openFences\cpp\build\_deps
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/download-json-populate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/verify-json-populate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/extract-json-populate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-download
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\download-json-populate.cmake;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\json-populate-urlinfo.txt;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-mkdir;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-download</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-update.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No update step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-update
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\json-populate-update-info.txt;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-download;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-update</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-patch.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No patch step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-patch
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\json-populate-patch-info.txt;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-update;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-patch</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-configure.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No configure step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\person\openFences\cpp\build\_deps\json-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-configure
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\tmp\json-populate-cfgcmd.txt;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-patch;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-configure</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-build.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No build step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\person\openFences\cpp\build\_deps\json-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-build
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-configure;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-build</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-install.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No install step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\person\openFences\cpp\build\_deps\json-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-install
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-build;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-install</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-test.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No test step for 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\person\openFences\cpp\build\_deps\json-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-test
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-install;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-test</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\0a7d2f977b66eaeb2b7f2c86221aa11c\json-populate-complete.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Completed 'json-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\cMake\bin\cmake.exe -E make_directory D:/person/openFences/cpp/build/_deps/json-subbuild/CMakeFiles/Debug
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/CMakeFiles/Debug/json-populate-complete
+if %errorlevel% neq 0 goto :cmEnd
+D:\cMake\bin\cmake.exe -E touch D:/person/openFences/cpp/build/_deps/json-subbuild/json-populate-prefix/src/json-populate-stamp/Debug/json-populate-done
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-install;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-mkdir;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-download;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-update;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-patch;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-configure;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-build;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\src\json-populate-stamp\Debug\json-populate-test;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\Debug\json-populate-complete</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\6ac308dc4a264ab42ee66a3473cb619c\json-populate.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\Debug\json-populate-complete;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\json-populate</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeLists.txt">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/person/openFences/cpp/build/_deps/json-subbuild/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\cMake\bin\cmake.exe -SD:/person/openFences/cpp/build/_deps/json-subbuild -BD:/person/openFences/cpp/build/_deps/json-subbuild --check-stamp-file D:/person/openFences/cpp/build/_deps/json-subbuild/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\cMake\share\cmake-4.1\Modules\CMakeGenericSystem.cmake;D:\cMake\share\cmake-4.1\Modules\CMakeInitializeConfigs.cmake;D:\cMake\share\cmake-4.1\Modules\CMakeSystemSpecificInformation.cmake;D:\cMake\share\cmake-4.1\Modules\CMakeSystemSpecificInitialize.cmake;D:\cMake\share\cmake-4.1\Modules\ExternalProject.cmake;D:\cMake\share\cmake-4.1\Modules\ExternalProject\PatchInfo.txt.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\RepositoryInfo.txt.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\UpdateInfo.txt.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\cfgcmd.txt.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\download.cmake.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\extractfile.cmake.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\mkdirs.cmake.in;D:\cMake\share\cmake-4.1\Modules\ExternalProject\shared_internal_commands.cmake;D:\cMake\share\cmake-4.1\Modules\Platform\Windows-Initialize.cmake;D:\cMake\share\cmake-4.1\Modules\Platform\Windows.cmake;D:\cMake\share\cmake-4.1\Modules\Platform\WindowsPaths.cmake;D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\4.1.1\CMakeSystem.cmake;D:\person\openFences\cpp\build\_deps\json-subbuild\json-populate-prefix\tmp\json-populate-mkdirs.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\json-populate">
+    </None>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="D:\person\openFences\cpp\build\_deps\json-subbuild\ZERO_CHECK.vcxproj">
+      <Project>{D684E13E-4D85-37D8-A64C-F3DC1D9698A8}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

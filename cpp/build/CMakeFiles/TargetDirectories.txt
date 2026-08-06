@@ -1,0 +1,9 @@
+D:/person/openFences/cpp/build/CMakeFiles/openfences.dir
+D:/person/openFences/cpp/build/CMakeFiles/diag.dir
+D:/person/openFences/cpp/build/CMakeFiles/icon_diag.dir
+D:/person/openFences/cpp/build/CMakeFiles/region_spike.dir
+D:/person/openFences/cpp/build/CMakeFiles/ctxmenu_spike.dir
+D:/person/openFences/cpp/build/CMakeFiles/vis_probe.dir
+D:/person/openFences/cpp/build/CMakeFiles/ALL_BUILD.dir
+D:/person/openFences/cpp/build/CMakeFiles/ZERO_CHECK.dir
+D:/person/openFences/cpp/build/_deps/json-build/CMakeFiles/ALL_BUILD.dir

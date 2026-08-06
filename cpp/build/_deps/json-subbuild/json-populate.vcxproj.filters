@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\aba167da149cf1d2e5cfb4b4aa6b0dad\json-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\0a7d2f977b66eaeb2b7f2c86221aa11c\json-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\6ac308dc4a264ab42ee66a3473cb619c\json-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\person\openFences\cpp\build\_deps\json-subbuild\CMakeFiles\json-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{48B23818-3E47-3111-A91A-DAC5B0BD0200}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

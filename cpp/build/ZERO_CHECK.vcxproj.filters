@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\person\openFences\cpp\build\CMakeFiles\4098b62ba79498f693929e5775283347\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{419AA433-6EE0-3BF8-B407-CFFEC7A2656E}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
