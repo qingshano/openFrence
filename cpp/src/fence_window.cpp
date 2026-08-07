@@ -87,6 +87,115 @@ HWND FenceWindow::DesktopHost() {
     return progman;   // no icon list (icons disabled?) — best effort
 }
 
+// ── OLE Drop Target ──
+// DragAcceptFiles only surfaces CF_HDROP (filesystem paths). System icons
+// (此电脑, 回收站) are shell namespace objects carried as CFSTR_SHELLIDLIST
+// PIDLs. RegisterDragDrop + IDropTarget receives both, and
+// SHCreateShellItemArrayFromDataObject resolves them uniformly into IShellItem
+// objects from which we extract display names and parse paths.
+
+static UINT s_cfShellIdList = 0;
+
+static bool HasShellDropFormat(IDataObject* pDataObj) {
+    FORMATETC fmt = {};
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_HGLOBAL;
+    fmt.cfFormat = CF_HDROP;
+    if (pDataObj->QueryGetData(&fmt) == S_OK) return true;
+    if (s_cfShellIdList) {
+        fmt.cfFormat = s_cfShellIdList;
+        if (pDataObj->QueryGetData(&fmt) == S_OK) return true;
+    }
+    return false;
+}
+
+class FenceDropTarget : public IDropTarget {
+    LONG m_ref = 1;
+    HWND m_hwnd = nullptr;
+    bool m_over = false;
+public:
+    explicit FenceDropTarget(HWND hwnd) : m_hwnd(hwnd) {}
+
+    STDMETHOD(QueryInterface)(REFIID riid, void** ppv) {
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+            *ppv = static_cast<IDropTarget*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHOD_(ULONG, AddRef)()  { return InterlockedIncrement(&m_ref); }
+    STDMETHOD_(ULONG, Release)() {
+        LONG c = InterlockedDecrement(&m_ref);
+        if (c == 0) delete this;
+        return c;
+    }
+
+    STDMETHOD(DragEnter)(IDataObject* pDataObj, DWORD, POINTL, DWORD* pdwEffect) {
+        m_over = HasShellDropFormat(pDataObj);
+        *pdwEffect = m_over ? DROPEFFECT_MOVE : DROPEFFECT_NONE;
+        if (m_over) {
+            auto* self = (FenceWindow*)GetWindowLongPtr(m_hwnd, GWLP_USERDATA);
+            if (self) self->SetDragOver(true);
+        }
+        return S_OK;
+    }
+    STDMETHOD(DragOver)(DWORD, POINTL, DWORD* pdwEffect) {
+        *pdwEffect = m_over ? DROPEFFECT_MOVE : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    STDMETHOD(DragLeave)() {
+        m_over = false;
+        auto* self = (FenceWindow*)GetWindowLongPtr(m_hwnd, GWLP_USERDATA);
+        if (self) self->SetDragOver(false);
+        return S_OK;
+    }
+    STDMETHOD(Drop)(IDataObject* pDataObj, DWORD, POINTL pt, DWORD* pdwEffect) {
+        m_over = false;
+        auto* self = (FenceWindow*)GetWindowLongPtr(m_hwnd, GWLP_USERDATA);
+        if (!self) { *pdwEffect = DROPEFFECT_NONE; return S_OK; }
+        self->SetDragOver(false);
+
+        CComPtr<IShellItemArray> items;
+        if (FAILED(SHCreateShellItemArrayFromDataObject(pDataObj, IID_PPV_ARGS(&items))) || !items) {
+            *pdwEffect = DROPEFFECT_NONE;
+            return S_OK;
+        }
+
+        POINT dropPt = { pt.x, pt.y };
+        ScreenToClient(m_hwnd, &dropPt);
+        float dx = (float)dropPt.x, dy = (float)dropPt.y;
+
+        DWORD count = 0;
+        items->GetCount(&count);
+        for (DWORD i = 0; i < count; i++) {
+            CComPtr<IShellItem> item;
+            if (FAILED(items->GetItemAt(i, &item)) || !item) continue;
+
+            LPWSTR pwszPath = nullptr;
+            if (FAILED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &pwszPath)) || !pwszPath)
+                continue;
+            std::wstring parsePath(pwszPath);
+            CoTaskMemFree(pwszPath);
+
+            LPWSTR pwszName = nullptr;
+            std::wstring displayName;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &pwszName)) && pwszName) {
+                displayName = pwszName;
+                CoTaskMemFree(pwszName);
+            }
+            if (displayName.empty()) displayName = parsePath;
+
+            self->AddIcon(displayName, parsePath, dx, dy);
+        }
+
+        *pdwEffect = DROPEFFECT_MOVE;
+        return S_OK;
+    }
+};
+
 FenceWindow::FenceWindow(const FenceData& data)
     : m_title(data.title), m_id(data.id), m_x(data.x), m_y(data.y)
 {
@@ -103,7 +212,7 @@ FenceWindow::FenceWindow(const FenceData& data)
 
     DPI_AWARENESS_CONTEXT prevCtx = AdoptHostAwareness(host);
     m_hwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_ACCEPTFILES,
+        WS_EX_LAYERED | WS_EX_TOOLWINDOW,
         ClassName(), data.title.c_str(), host ? WS_CHILD : WS_POPUP,
         pos.x, pos.y, data.w, data.h,
         host, nullptr, GetModuleHandle(nullptr), this);
@@ -114,7 +223,15 @@ FenceWindow::FenceWindow(const FenceData& data)
     if (host)
         SetWindowPos(m_hwnd, HWND_TOP, 0, 0, 0, 0,   // above the desktop icons
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    DragAcceptFiles(m_hwnd, TRUE);
+    if (!s_cfShellIdList)
+        s_cfShellIdList = (UINT)RegisterClipboardFormatW(CFSTR_SHELLIDLIST);
+    auto* dt = new FenceDropTarget(m_hwnd);
+    if (SUCCEEDED(RegisterDragDrop(m_hwnd, dt)))
+        dt->Release();
+    else {
+        delete dt;
+        DragAcceptFiles(m_hwnd, TRUE);   // fallback: filesystem paths only
+    }
     ShowWindow(m_hwnd, SW_SHOW);
     Redraw();
     CaptureBackdrop();   // initial frosted-glass snapshot
@@ -128,7 +245,8 @@ FenceWindow::~FenceWindow() {
     // with it — by the time we run, the HWND is already dead.
     if (!m_hwnd || !IsWindow(m_hwnd)) return;
     if (m_cursorTimer) KillTimer(m_hwnd, 1);
-    DragAcceptFiles(m_hwnd, FALSE);
+    RevokeDragDrop(m_hwnd);       // no-op if RegisterDragDrop failed
+    DragAcceptFiles(m_hwnd, FALSE); // no-op if DragAcceptFiles was never called
     DestroyWindow(m_hwnd);
 }
 
@@ -765,7 +883,6 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (!self) { DragFinish(hdrop); return 0; }
         self->SetDragOver(false);
 
-        // Drop point in this window's client coordinates
         POINT dropPt = {};
         DragQueryPoint(hdrop, &dropPt);
         float dx = (float)dropPt.x, dy = (float)dropPt.y;
@@ -774,16 +891,12 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         for (UINT i = 0; i < count; i++) {
             WCHAR path[MAX_PATH];
             if (DragQueryFileW(hdrop, i, path, MAX_PATH)) {
-                // Copy filename to separate buffer before stripping extension,
-                // so 'path' keeps the original extension for icon loading.
                 WCHAR display[MAX_PATH];
                 wcscpy_s(display, PathFindFileNameW(path));
                 PathRemoveExtensionW(display);
                 if (display[0])
                     self->AddIcon(display, path, dx, dy);
             }
-            // No manual cascade: AddIcon snaps every file to the nearest FREE
-            // grid cell, so a multi-drop fills cells around the drop point.
         }
         DragFinish(hdrop);
         return 0;

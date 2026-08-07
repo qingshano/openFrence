@@ -10,10 +10,12 @@
 #include <vector>
 #include <unordered_map>
 
-// Simple COM init RAII
+// Simple COM/OLE init RAII. OleInitialize is required for RegisterDragDrop
+// and other OLE features (drag-and-drop, clipboard); it internally calls
+// CoInitializeEx so COM interfaces work as well.
 struct ComInit {
-    ComInit()  { CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); }
-    ~ComInit() { CoUninitialize(); }
+    ComInit()  { OleInitialize(nullptr); }
+    ~ComInit() { OleUninitialize(); }
 };
 
 /// Live desktop icon glyph size, in physical pixels — the size the desktop

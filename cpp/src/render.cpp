@@ -360,8 +360,22 @@ ID2D1Bitmap* RenderContext::LoadFileIcon(const std::wstring& filePath) {
     CComPtr<ID2D1Bitmap> d2dIcon;
 
     SHFILEINFOW shfi = {};
-    if (SHGetFileInfoW(filePath.c_str(), 0, &shfi, sizeof(shfi),
-                       SHGFI_SYSICONINDEX) && shfi.iIcon != -1) {
+    // Namespace paths (::{CLSID}) need PIDL-based resolution;
+    // SHGetFileInfoW on a raw parse string does not always resolve the icon.
+    bool isNamespacePath = filePath.size() > 2 && filePath[0] == L':' && filePath[1] == L':';
+    bool gotIcon = false;
+    if (isNamespacePath) {
+        PIDLIST_ABSOLUTE pidl = nullptr;
+        if (SUCCEEDED(SHParseDisplayName(filePath.c_str(), nullptr, &pidl, 0, nullptr)) && pidl) {
+            gotIcon = SHGetFileInfoW((LPCWSTR)pidl, 0, &shfi, sizeof(shfi),
+                                     SHGFI_PIDL | SHGFI_SYSICONINDEX) && shfi.iIcon != -1;
+            CoTaskMemFree(pidl);
+        }
+    } else {
+        gotIcon = SHGetFileInfoW(filePath.c_str(), 0, &shfi, sizeof(shfi),
+                                 SHGFI_SYSICONINDEX) && shfi.iIcon != -1;
+    }
+    if (gotIcon) {
         // Pick the smallest image list whose canvas still covers the glyph
         // box, then draw the whole bitmap into the box: the shell keeps the
         // art-to-canvas ratio consistent across the LARGE/EXTRALARGE lists,
