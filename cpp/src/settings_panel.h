@@ -108,11 +108,13 @@ private:
     RECT m_thMinus = {};
     RECT m_thPlus = {};
     RECT m_titlePosSeg[3] = {};   // title alignment: left / center / right
+    RECT m_displayModeSeg[2] = {}; // display mode: grid / list
     RECT m_deleteBtn = {};
     float m_rowH = 26.0f;
     // Label-band Y positions for drawing (set by ComputeLayout)
     float m_fontLblY = 0, m_sizeLblY = 0, m_opLblY = 0, m_panelLblY = 0,
-          m_titleLblY = 0, m_titlePosLblY = 0, m_thLblY = 0, m_sepY = 0;
+          m_titleLblY = 0, m_titlePosLblY = 0, m_thLblY = 0, m_sepY = 0,
+          m_displayModeLblY = 0;
 
     struct Hit { int id; RECT rc; };
     std::vector<Hit> m_hits;

@@ -41,9 +41,11 @@ struct FenceAppearance {
     float accent[4]  = {0.35f, 0.55f, 0.95f, 1.0f};
     float r          = 12.0f;
     float titleH     = 34.0f;
+    float searchH    = 28.0f;   // search box height (mapped fences only)
     float fontSize   = 12.0f;
     float iconSize   = 11.0f;   // icon *label* font size
     int   titleAlign = 0;       // title text: 0 = left, 1 = center, 2 = right
+    int   displayMode = 0;      // 0 = grid (icons in a grid), 1 = list (one per row)
     WCHAR fontName[64] = L"Segoe UI";
 
     // Icon cell metrics. Shared by rendering AND mouse hit-testing so the
@@ -60,8 +62,19 @@ struct FenceAppearance {
 struct IconEntry {
     std::wstring name;
     std::wstring path;  // full file path for icon extraction
+    std::wstring ext;   // extension incl. '.' (PathFindExtensionW), for Type sort
+    ULONGLONG size = 0;
+    FILETIME lastWrite = {};
+    bool isDir = false;
     float x = 0.0f;     // cell top-left inside the fence client area; icons
     float y = 0.0f;     // rest on the icon grid (snapped on drop/release)
+};
+
+struct FenceViewState {
+    const std::vector<int>* filter = nullptr;   // null = show all
+    const std::wstring* searchText = nullptr;   // null = no search box
+    bool caretOn = false;
+    bool loading = false;
 };
 
 class RenderContext {
@@ -86,7 +99,9 @@ public:
                    const std::vector<std::wstring>* selectedPaths = nullptr,
                    bool dragActive = false,
                    const RECT* marquee = nullptr,
-                   bool chevronHover = false, bool chevronDown = false);
+                   bool chevronHover = false, bool chevronDown = false,
+                   float scrollY = 0.0f,
+                   const FenceViewState* view = nullptr);
     bool Resize(UINT w, UINT h);
     bool Present(HWND hwnd, int x, int y);
 
@@ -155,7 +170,7 @@ private:
     // Rubber-band marquee (accent color, light fill / stronger edge). Cached
     // because a live band repaints on every mouse move — no per-frame brushes.
     CComPtr<ID2D1SolidColorBrush> m_marqueeFillBrush, m_marqueeEdgeBrush;
-    CComPtr<IDWriteTextFormat>  m_titleFormat, m_iconFormat;
+    CComPtr<IDWriteTextFormat>  m_titleFormat, m_iconFormat, m_listFormat;
     CComPtr<ID2D1StrokeStyle>   m_chevronStroke;   // round caps/joins for the collapse arrow
     // Collapse arrow: ONE open path (its apex is a true round join — two
     // separate lines would double a round cap there and bulge). Points up;
@@ -182,4 +197,8 @@ private:
     // drag frequency). Invalidated when the text format is rebuilt.
     std::wstring m_selLabelPath;
     float m_selLabelW = 0.0f, m_selLabelH = 0.0f;
+
+    // Search box text width (cached per text value to avoid per-frame layout).
+    std::wstring m_searchTextCache;
+    float m_searchTextW = 0.0f;
 };

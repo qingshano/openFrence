@@ -59,6 +59,7 @@ void RenderContext::ScaleAppearance() {
     float s = m_dpiX / 96.0f;
     m_app.r        *= s;
     m_app.titleH   *= s;
+    m_app.searchH  *= s;
     m_app.fontSize *= s;
     m_app.iconSize *= s;
     m_app.cellW    *= s;
@@ -257,6 +258,19 @@ bool RenderContext::CreateTextFormats() {
     DWRITE_TRIMMING trim = { DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
     m_iconFormat->SetTrimming(&trim, ellipsis);
 
+    // List-mode format: left-aligned, vertically centered, same font/size as icons
+    m_dwFactory->CreateTextFormat(m_app.fontName, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, m_app.iconSize, L"en-US", &m_listFormat);
+    if (m_listFormat) {
+        m_listFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        m_listFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        m_listFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        CComPtr<IDWriteInlineObject> ellipsis2;
+        m_dwFactory->CreateEllipsisTrimmingSign(m_listFormat, &ellipsis2);
+        m_listFormat->SetTrimming(&trim, ellipsis2);
+    }
+
     return true;
 }
 
@@ -270,7 +284,7 @@ void RenderContext::RebuildStyles() {
     m_borderGradBrush.Release(); m_topHiBrush.Release();
     m_marqueeFillBrush.Release(); m_marqueeEdgeBrush.Release();
     m_chevronBrush.Release(); m_chevronPlate.Release();
-    m_titleFormat.Release(); m_iconFormat.Release();
+    m_titleFormat.Release(); m_iconFormat.Release(); m_listFormat.Release();
     CreateBrushes();
     CreateTextFormats();
     BuildChevronPath();   // geometry follows the (possibly changed) titleH
@@ -599,7 +613,9 @@ bool RenderContext::DrawFence(const std::wstring& title,
                                const std::vector<std::wstring>* selectedPaths,
                                bool dragActive,
                                const RECT* marquee,
-                               bool chevronHover, bool chevronDown) {
+                               bool chevronHover, bool chevronDown,
+                               float scrollY,
+                               const FenceViewState* view) {
     float w = (float)m_width, h = (float)m_height;
     float r = m_app.r, th = m_app.titleH;
     auto& ctx = *m_d2dTarget.p;
@@ -690,11 +706,6 @@ bool RenderContext::DrawFence(const std::wstring& title,
     ctx.FillRectangle(sepRect, m_sepBrush.p);
 
     // ── Title text (right edge leaves room for the collapse chevron) ──
-    // Left-aligned titles get a left inset only; center/right-aligned ones
-    // get symmetric insets so the alignment reads correctly. Renaming uses
-    // the SAME layout rect as the normal title: the format is vertically
-    // centered, and a taller editing box would re-center the text lower —
-    // the title visibly jumped down a line on entering edit mode.
     {
         const float pad = 14.0f;
         float tr = (m_app.titleAlign == 0) ? (w - th) : (w - th - pad);
@@ -707,131 +718,304 @@ bool RenderContext::DrawFence(const std::wstring& title,
     // ── Collapse chevron ──
     drawChevron(false);
 
+    // ── Search box (mapped fences) ──
+    float bodyTop = th;
+    if (view && view->searchText) {
+        float sh = m_app.searchH;
+        bodyTop = th + sh;
+        float sx = 8.0f, sy = th + 4.0f, sw = w - 16.0f, sbh = sh - 8.0f;
+
+        // Field background
+        D2D1_ROUNDED_RECT sbox{ {sx, sy, sx + sw, sy + sbh}, 4.0f, 4.0f };
+        CComPtr<ID2D1SolidColorBrush> sb;
+        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.07f), &sb);
+        if (sb) ctx.FillRoundedRectangle(sbox, sb.p);
+        CComPtr<ID2D1SolidColorBrush> se;
+        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.10f), &se);
+        if (se) ctx.DrawRoundedRectangle(sbox, se.p, 1.0f);
+
+        // Magnifier icon (circle + handle)
+        float mgCx = sx + 14.0f, mgCy = sy + sbh * 0.5f, mgR = 5.0f;
+        CComPtr<ID2D1SolidColorBrush> mgb;
+        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.35f), &mgb);
+        if (mgb) {
+            D2D1_ELLIPSE mgEllipse{ {mgCx, mgCy}, mgR, mgR };
+            ctx.DrawEllipse(mgEllipse, mgb.p, 1.5f);
+            float a45 = 3.14159f / 4.0f;
+            float hx = mgCx + mgR * cosf(a45), hy = mgCy + mgR * sinf(a45);
+            float hx2 = mgCx + (mgR + 3.5f) * cosf(a45);
+            float hy2 = mgCy + (mgR + 3.5f) * sinf(a45);
+            ctx.DrawLine({hx, hy}, {hx2, hy2}, mgb.p, 1.5f);
+        }
+
+        // Text or placeholder
+        float tx = sx + 28.0f;
+        D2D1_RECT_F stxt{ tx, sy, sx + sw - 8.0f, sy + sbh };
+        if (view->searchText->empty()) {
+            CComPtr<ID2D1SolidColorBrush> phb;
+            ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.25f), &phb);
+            static const wchar_t* kSearchHint = L"Search\u2026";
+            if (phb) ctx.DrawText(kSearchHint, (UINT32)wcslen(kSearchHint),
+                m_listFormat.p, stxt, phb.p, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            m_searchTextW = 0.0f;   // caret at start of field
+        } else {
+            ctx.DrawText(view->searchText->c_str(), (UINT32)view->searchText->size(),
+                m_listFormat.p, stxt, m_iconTextBrush.p,
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            if (*view->searchText != m_searchTextCache) {
+                m_searchTextCache = *view->searchText;
+                CComPtr<IDWriteTextLayout> layout;
+                if (SUCCEEDED(m_dwFactory->CreateTextLayout(
+                        view->searchText->c_str(), (UINT32)view->searchText->size(),
+                        m_listFormat.p, 2000.0f, sbh, &layout)) && layout) {
+                    DWRITE_TEXT_METRICS tm = {};
+                    layout->GetMetrics(&tm);
+                    m_searchTextW = tm.width;
+                }
+            }
+        }
+
+        // Caret (blinks regardless of whether text is present)
+        if (view->caretOn) {
+            float cx = tx + m_searchTextW + 1.0f;
+            CComPtr<ID2D1SolidColorBrush> cb;
+            ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.7f), &cb);
+            if (cb) ctx.FillRectangle(
+                D2D1_RECT_F{ cx, sy + 4.0f, cx + 1.5f, sy + sbh - 4.0f }, cb.p);
+        }
+    }
+
+    // ── Loading placeholder (shown during folder mapping enumeration) ──
+    if (view && view->loading && !collapsed) {
+        static const wchar_t* kLoading = L"Loading\u2026";
+        D2D1_RECT_F lr{ 4.0f, bodyTop, w - 4.0f, h };
+        ctx.DrawText(kLoading, (UINT32)wcslen(kLoading),
+            m_iconFormat.p, lr, m_iconTextBrush.p,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
     // ── Icons (free placement: each entry carries its own position) ──
-    if (!icons.empty()) {
-        const float ICON_SIZE = m_app.imgSize;
-        const float CELL_W = m_app.cellW;
-        const float CELL_H = m_app.cellH;
+    if (!icons.empty() && !(view && view->loading)) {
+        const bool listMode = (m_app.displayMode == 1);
+        const float pad = 4.0f;   // same as kGridPad in fence_window.cpp
 
         // Explorer-style state plates share one rounded radius (half the
         // fence corner so the plate reads as a child of the panel).
         const float cellR = m_app.r * 0.5f;
         const size_t selCount = selectedPaths ? selectedPaths->size() : 0;
 
-        for (size_t i = 0; i < icons.size(); i++) {
+        // List mode: compact rows, small icon left, text right
+        const float listIconSz = m_app.iconSize * 1.8f;
+        const float listRowH = m_app.iconSize * 2.6f;
+
+        int totalVisible = (int)icons.size();
+        if (view && view->filter)
+            totalVisible = (int)view->filter->size();
+
+        for (int vi = 0; vi < totalVisible; vi++) {
+            int i = view && view->filter ? (*view->filter)[vi] : vi;
             float cx = icons[i].x, cy = icons[i].y;
-            const bool hovered  = (int)i == hoverIcon;
-            // Selection is a path set (marquee multi-select); a live group
-            // drag ghosts every selected member at once.
+            const bool hovered  = i == hoverIcon;
             const bool selected = selectedPaths &&
                 std::find(selectedPaths->begin(), selectedPaths->end(),
                           icons[i].path) != selectedPaths->end();
             const bool dragged  = dragActive && selected;
 
-            // Hover / selection plate (Explorer desktop style: a soft rounded
-            // tile behind glyph + label). Selection uses the accent color,
-            // plain hover stays neutral white; hovering a selected icon
-            // brightens the plate slightly. Suppressed while the icon is the
-            // one being dragged — it reads as a lifted, ghosted tile instead.
-            if ((hovered || selected) && !dragged) {
-                float fillA, edgeA, cr, cg, cb;
-                if (selected) {
-                    cr = m_app.accent[0]; cg = m_app.accent[1]; cb = m_app.accent[2];
-                    fillA = hovered ? 0.34f : 0.26f;
-                    edgeA = hovered ? 0.95f : 0.75f;
-                } else {
-                    // Plain hover: clearly visible but lighter than selection
-                    // (Explorer shows an obvious rounded highlight on hover).
-                    cr = cg = cb = 1.0f;
-                    fillA = 0.12f;
-                    edgeA = 0.28f;
-                }
-                D2D1_ROUNDED_RECT plate{{cx + 1, cy + 1,
-                                         cx + CELL_W - 1, cy + CELL_H - 1},
-                                        cellR, cellR};
-                CComPtr<ID2D1SolidColorBrush> fillB, edgeB;
-                ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, fillA), &fillB);
-                ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, edgeA), &edgeB);
-                if (fillB) ctx.FillRoundedRectangle(plate, fillB.p);
-                if (edgeB) ctx.DrawRoundedRectangle(plate, edgeB.p, 1.0f);
-            }
+            const float cellW = listMode ? (w - 2 * pad) : m_app.cellW;
+            const float cellH = listMode ? listRowH : m_app.cellH;
+            const float iconSz = listMode ? listIconSz : m_app.imgSize;
 
-            // Icon image (centered in the cell's glyph band). The icon being
-            // dragged renders translucent, like Explorer's lifted tile.
             const float glyphAlpha = dragged ? 0.55f : 1.0f;
             auto* iconBmp = LoadFileIcon(icons[i].path);
-            if (iconBmp) {
-                // Fill the glyph band at a uniform size: downscale large
-                // sources, upscale undersized ones, so every icon in the fence
-                // reads the same size (HQ cubic keeps both decent).
-                auto sz = iconBmp->GetSize();
-                float fit = (std::min)(ICON_SIZE / sz.width, ICON_SIZE / sz.height);
-                float drawW = sz.width * fit;
-                float drawH = sz.height * fit;
-                float ix = cx + (CELL_W - drawW) * 0.5f;
-                float iy = cy + 2.0f + (ICON_SIZE - drawH) * 0.5f;
-                D2D1_RECT_F iconRect{ix, iy, ix + drawW, iy + drawH};
-                // HQ cubic keeps downscaled glyphs (e.g. 256px jumbo → 54px
-                // at high DPI) crisp; at 1:1 it is a no-op.
-                ctx.DrawBitmap(iconBmp, iconRect, glyphAlpha,
-                               INTERP_HIGH_QUALITY_CUBIC, nullptr);
-            }
 
-            // Label below icon (horizontally centered, ellipsis for overflow)
-            D2D1_RECT_F textRect{cx, cy + ICON_SIZE + 4.0f, cx + CELL_W, cy + CELL_H};
-            if (dragged) {
-                // Faded label to match the lifted glyph.
-                CComPtr<ID2D1SolidColorBrush> faded;
-                ctx.CreateSolidColorBrush(D2D1::ColorF(
-                    m_app.iconText[0], m_app.iconText[1], m_app.iconText[2],
-                    m_app.iconText[3] * glyphAlpha), &faded);
-                ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
-                    m_iconFormat.p, textRect, faded ? faded.p : m_iconTextBrush.p,
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
-            } else if (selected && selCount == 1) {
-                // Single selected label gets Explorer's treatment: a tight
-                // accent box around the text and a brighter label color. The
-                // text is measured once per selection (result cached —
-                // redraws run at drag frequency and must not allocate per
-                // frame), so the box hugs the label.
-                if (icons[i].path != m_selLabelPath) {
-                    CComPtr<IDWriteTextLayout> layout;
-                    if (SUCCEEDED(m_dwFactory->CreateTextLayout(
-                            icons[i].name.c_str(), (UINT32)icons[i].name.size(),
-                            m_iconFormat.p, CELL_W, CELL_H, &layout)) && layout) {
-                        DWRITE_TEXT_METRICS tm = {};
-                        layout->GetMetrics(&tm);
-                        m_selLabelW = tm.width;
-                        m_selLabelH = tm.height;
-                        m_selLabelPath = icons[i].path;
+            if (listMode) {
+                // ── List mode: small icon left, text right ──
+                // Apply scroll offset and clamp to the body area (below title bar).
+                float visY = cy - scrollY;
+                if (visY >= h || visY + cellH <= bodyTop) continue;
+
+                float clipTop = (std::max)(visY, bodyTop);
+                float clipH = cellH - (clipTop - visY);
+                if (clipH < cellH * 0.5f) continue;   // less than half visible → skip
+
+                // Hover / selection plate (clipped to body)
+                if ((hovered || selected) && !dragged) {
+                    float fillA, edgeA, cr, cg, cb;
+                    if (selected) {
+                        cr = m_app.accent[0]; cg = m_app.accent[1]; cb = m_app.accent[2];
+                        fillA = hovered ? 0.34f : 0.26f;
+                        edgeA = hovered ? 0.95f : 0.75f;
+                    } else {
+                        cr = cg = cb = 1.0f;
+                        fillA = 0.12f;
+                        edgeA = 0.28f;
                     }
+                    D2D1_ROUNDED_RECT plate{{cx + 1, clipTop + 1,
+                                             cx + cellW - 1, clipTop + clipH - 1},
+                                            cellR, cellR};
+                    CComPtr<ID2D1SolidColorBrush> fb, eb;
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, fillA), &fb);
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, edgeA), &eb);
+                    if (fb) ctx.FillRoundedRectangle(plate, fb.p);
+                    if (eb) ctx.DrawRoundedRectangle(plate, eb.p, 1.0f);
                 }
-                if (!m_selLabelPath.empty()) {
-                    float bx = cx + (CELL_W - m_selLabelW) * 0.5f;
-                    D2D1_ROUNDED_RECT box{
-                        {bx - 3.0f, textRect.top - 1.0f,
-                         bx + m_selLabelW + 3.0f, textRect.top + m_selLabelH + 1.5f},
-                        m_app.r * 0.25f, m_app.r * 0.25f};
-                    CComPtr<ID2D1SolidColorBrush> boxB;
+
+                // Icon: vertically centered in the visible portion of the row
+                float iconCY = clipTop + (std::max)(0.0f, clipH - listIconSz) * 0.5f;
+
+                if (iconBmp && clipH > 2.0f) {
+                    auto sz = iconBmp->GetSize();
+                    float fit = (std::min)(listIconSz / sz.width, listIconSz / sz.height);
+                    float drawW = sz.width * fit;
+                    float drawH = sz.height * fit;
+                    float dx = cx + 2.0f + (listIconSz - drawW) * 0.5f;
+                    float dy = iconCY + (listIconSz - drawH) * 0.5f;
+                    D2D1_RECT_F iconRect{dx, dy, dx + drawW, dy + drawH};
+                    ctx.DrawBitmap(iconBmp, iconRect, glyphAlpha,
+                                   INTERP_HIGH_QUALITY_CUBIC, nullptr);
+                }
+
+                // Text: positioned in the visible row portion
+                float tx = cx + listIconSz + 8.0f;
+                D2D1_RECT_F textRect{tx, clipTop, cx + cellW - 4.0f, clipTop + clipH};
+                auto* listFmt = m_listFormat.p ? m_listFormat.p : m_iconFormat.p;
+                auto* textBrush = selected ? m_textBrush.p : m_iconTextBrush.p;
+                if (dragged) {
+                    CComPtr<ID2D1SolidColorBrush> faded;
                     ctx.CreateSolidColorBrush(D2D1::ColorF(
-                        m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.92f), &boxB);
-                    if (boxB) ctx.FillRoundedRectangle(box, boxB.p);
+                        m_app.iconText[0], m_app.iconText[1], m_app.iconText[2],
+                        m_app.iconText[3] * glyphAlpha), &faded);
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        listFmt, textRect, faded ? faded.p : m_iconTextBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                } else {
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        listFmt, textRect, textBrush,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
                 }
-                ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
-                    m_iconFormat.p, textRect, m_textBrush.p,
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
-            } else if (selected) {
-                // Multi-selection: the selection plate already marks every
-                // member, so labels only brighten — no accent box (avoiding
-                // per-frame text layout for each of many selected icons).
-                ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
-                    m_iconFormat.p, textRect, m_textBrush.p,
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
             } else {
-                ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
-                    m_iconFormat.p, textRect, m_iconTextBrush.p,
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                // ── Grid mode ──
+                // Hover / selection plate
+                if ((hovered || selected) && !dragged) {
+                    float fillA, edgeA, cr, cg, cb;
+                    if (selected) {
+                        cr = m_app.accent[0]; cg = m_app.accent[1]; cb = m_app.accent[2];
+                        fillA = hovered ? 0.34f : 0.26f;
+                        edgeA = hovered ? 0.95f : 0.75f;
+                    } else {
+                        cr = cg = cb = 1.0f;
+                        fillA = 0.12f;
+                        edgeA = 0.28f;
+                    }
+                    D2D1_ROUNDED_RECT plate{{cx + 1, cy + 1,
+                                             cx + cellW - 1, cy + cellH - 1},
+                                            cellR, cellR};
+                    CComPtr<ID2D1SolidColorBrush> fillB, edgeB;
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, fillA), &fillB);
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(cr, cg, cb, edgeA), &edgeB);
+                    if (fillB) ctx.FillRoundedRectangle(plate, fillB.p);
+                    if (edgeB) ctx.DrawRoundedRectangle(plate, edgeB.p, 1.0f);
+                }
+
+                if (iconBmp) {
+                    auto sz = iconBmp->GetSize();
+                    float fit = (std::min)(iconSz / sz.width, iconSz / sz.height);
+                    float drawW = sz.width * fit;
+                    float drawH = sz.height * fit;
+                    float ix = cx + (cellW - drawW) * 0.5f;
+                    float iy = cy + 2.0f + (iconSz - drawH) * 0.5f;
+                    D2D1_RECT_F iconRect{ix, iy, ix + drawW, iy + drawH};
+                    ctx.DrawBitmap(iconBmp, iconRect, glyphAlpha,
+                                   INTERP_HIGH_QUALITY_CUBIC, nullptr);
+                }
+
+                D2D1_RECT_F textRect{cx, cy + iconSz + 4.0f, cx + cellW, cy + cellH};
+                if (dragged) {
+                    CComPtr<ID2D1SolidColorBrush> faded;
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(
+                        m_app.iconText[0], m_app.iconText[1], m_app.iconText[2],
+                        m_app.iconText[3] * glyphAlpha), &faded);
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        m_iconFormat.p, textRect, faded ? faded.p : m_iconTextBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                } else if (selected && selCount == 1) {
+                    if (icons[i].path != m_selLabelPath) {
+                        CComPtr<IDWriteTextLayout> layout;
+                        if (SUCCEEDED(m_dwFactory->CreateTextLayout(
+                                icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                                m_iconFormat.p, cellW, cellH, &layout)) && layout) {
+                            DWRITE_TEXT_METRICS tm = {};
+                            layout->GetMetrics(&tm);
+                            m_selLabelW = tm.width;
+                            m_selLabelH = tm.height;
+                            m_selLabelPath = icons[i].path;
+                        }
+                    }
+                    if (!m_selLabelPath.empty()) {
+                        float bx = cx + (cellW - m_selLabelW) * 0.5f;
+                        D2D1_ROUNDED_RECT box{
+                            {bx - 3.0f, textRect.top - 1.0f,
+                             bx + m_selLabelW + 3.0f, textRect.top + m_selLabelH + 1.5f},
+                            m_app.r * 0.25f, m_app.r * 0.25f};
+                        CComPtr<ID2D1SolidColorBrush> boxB;
+                        ctx.CreateSolidColorBrush(D2D1::ColorF(
+                            m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.92f), &boxB);
+                        if (boxB) ctx.FillRoundedRectangle(box, boxB.p);
+                    }
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        m_iconFormat.p, textRect, m_textBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                } else if (selected) {
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        m_iconFormat.p, textRect, m_textBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                } else {
+                    ctx.DrawText(icons[i].name.c_str(), (UINT32)icons[i].name.size(),
+                        m_iconFormat.p, textRect, m_iconTextBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                }
             }
+        }
+    }
+
+    // No-results placeholder (filter active, zero matches)
+    if (view && view->filter && view->filter->empty() && view->searchText &&
+        !view->searchText->empty() && !icons.empty()) {
+        static const wchar_t* kNoResults = L"No results";
+        D2D1_RECT_F nr{ 4.0f, bodyTop, w - 4.0f, h };
+        ctx.DrawText(kNoResults, (UINT32)wcslen(kNoResults),
+            m_iconFormat.p, nr, m_iconTextBrush.p,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    // ── List-mode scrollbar ──
+    if (m_app.displayMode == 1 && !icons.empty()) {
+        float rowH = m_app.iconSize * 2.6f;
+        float contentH = h - bodyTop;
+        int visCount = view && view->filter ? (int)view->filter->size() : (int)icons.size();
+        float totalH = (float)visCount * rowH;
+        float maxScroll = totalH - contentH;
+        if (maxScroll > 0) {
+            float sbW = 6.0f;
+            float sbPad = 2.0f;
+            float trackTop = bodyTop + sbPad;
+            float trackBot = h - sbPad;
+            float trackX = w - sbW - sbPad;
+            float trackH = trackBot - trackTop;
+            float thumbH = (std::max)(20.0f, trackH * contentH / totalH);
+            float thumbTop = trackTop + (scrollY / maxScroll) * (trackH - thumbH);
+
+            D2D1_ROUNDED_RECT track{{trackX, trackTop, trackX + sbW, trackBot},
+                                    sbW * 0.5f, sbW * 0.5f};
+            CComPtr<ID2D1SolidColorBrush> tb;
+            ctx.CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.08f), &tb);
+            if (tb) ctx.FillRoundedRectangle(track, tb.p);
+
+            D2D1_ROUNDED_RECT thumb{{trackX, thumbTop, trackX + sbW, thumbTop + thumbH},
+                                    sbW * 0.5f, sbW * 0.5f};
+            CComPtr<ID2D1SolidColorBrush> mb;
+            ctx.CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 0.25f), &mb);
+            if (mb) ctx.FillRoundedRectangle(thumb, mb.p);
         }
     }
 
@@ -875,7 +1059,7 @@ bool RenderContext::Resize(UINT w, UINT h) {
     m_borderGradBrush.Release(); m_topHiBrush.Release();
     m_marqueeFillBrush.Release(); m_marqueeEdgeBrush.Release();
     m_chevronBrush.Release(); m_chevronPlate.Release();
-    m_titleFormat.Release(); m_iconFormat.Release();
+    m_titleFormat.Release(); m_iconFormat.Release(); m_listFormat.Release();
     m_d2dTarget.Release();
     m_wicBitmap.Release();
 

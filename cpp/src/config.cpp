@@ -58,6 +58,10 @@ json SaveFence(FenceWindow& f) {
     jf["bg"]        = { app.bg[0], app.bg[1], app.bg[2], app.bg[3] };
     jf["titleColor"]= { app.title[0], app.title[1], app.title[2], app.title[3] };
     jf["titleAlign"]= app.titleAlign;
+    jf["displayMode"]= app.displayMode;
+    jf["source"]    = ToUtf8(d.sourceFolder);
+    jf["sortCol"]   = d.sortCol;
+    jf["sortAsc"]   = d.sortAsc;
     jf["titleH"]    = app.titleH;   // physical px (appearance is pre-scaled)
     jf["fontSize"]  = app.fontSize;
     jf["fontName"]  = ToUtf8(app.fontName);
@@ -92,6 +96,7 @@ void LoadFence(const json& jf) {
     GetColor4(jf, "bg", app.bg);
     GetColor4(jf, "titleColor", app.title);
     app.titleAlign = jf.value("titleAlign", app.titleAlign);
+    app.displayMode = jf.value("displayMode", app.displayMode);
     app.titleH     = jf.value("titleH", app.titleH);
     app.fontSize   = jf.value("fontSize", app.fontSize);
     if (jf.contains("fontName") && jf["fontName"].is_string()) {
@@ -101,24 +106,33 @@ void LoadFence(const json& jf) {
     }
     f->GetRender().RebuildStyles();
 
-    // Icons: restore positions as saved, then re-snap onto the current grid
-    // (a no-op unless the desktop icon size changed between sessions).
-    std::vector<IconEntry> icons;
-    if (jf.contains("icons") && jf["icons"].is_array()) {
-        icons.reserve(jf["icons"].size());
-        for (const auto& ji : jf["icons"]) {
-            if (!ji.is_object()) continue;
-            IconEntry e;
-            e.name = FromUtf8(ji.value("name", std::string()));
-            e.path = FromUtf8(ji.value("path", std::string()));
-            e.x = ji.value("x", 0.0f);
-            e.y = ji.value("y", 0.0f);
-            if (e.path.empty()) continue;
-            icons.push_back(std::move(e));
+    fd.sourceFolder = FromUtf8(jf.value("source", std::string()));
+
+    if (jf.contains("sortCol"))
+        f->SetSortPreset(jf.value("sortCol", 0), jf.value("sortAsc", true));
+
+    if (!fd.sourceFolder.empty()) {
+        f->MapToFolder(fd.sourceFolder);
+    } else {
+        // Icons: restore positions as saved, then re-snap onto the current grid
+        // (a no-op unless the desktop icon size changed between sessions).
+        std::vector<IconEntry> icons;
+        if (jf.contains("icons") && jf["icons"].is_array()) {
+            icons.reserve(jf["icons"].size());
+            for (const auto& ji : jf["icons"]) {
+                if (!ji.is_object()) continue;
+                IconEntry e;
+                e.name = FromUtf8(ji.value("name", std::string()));
+                e.path = FromUtf8(ji.value("path", std::string()));
+                e.x = ji.value("x", 0.0f);
+                e.y = ji.value("y", 0.0f);
+                if (e.path.empty()) continue;
+                icons.push_back(std::move(e));
+            }
         }
+        f->SetIcons(icons);
+        f->RelayoutIcons();
     }
-    f->SetIcons(icons);
-    f->RelayoutIcons();
 
     // Collapse LAST: while expanded the window still has its saved height,
     // so ToggleCollapse remembers the right m_expandedH.

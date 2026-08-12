@@ -31,6 +31,7 @@ add_executable(openfences
     src/icon_extract.cpp
     src/menu_icons.cpp
     src/config.cpp
+    src/explorer_sort.cpp
     src/app.rc
 )
 

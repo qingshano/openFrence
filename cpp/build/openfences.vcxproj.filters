@@ -25,6 +25,9 @@
     <ClCompile Include="D:\person\openFences\cpp\src\config.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="D:\person\openFences\cpp\src\explorer_sort.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="D:\person\openFences\cpp\CMakeLists.txt" />

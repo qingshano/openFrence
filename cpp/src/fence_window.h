@@ -8,13 +8,17 @@
 #include <algorithm>
 #include "render.h"
 
-#define WM_FENCE_DELETE (WM_APP + 100)
-#define WM_FENCE_RESHOW (WM_APP + 101)   // posted to undo an external hide (Win+D)
+#define WM_FENCE_DELETE  (WM_APP + 100)
+#define WM_FENCE_RESHOW  (WM_APP + 101)   // posted to undo an external hide (Win+D)
+#define WM_FENCE_REFRESH (WM_APP + 102)   // source folder changed → re-enumerate
 
 struct FenceData {
     std::wstring id, title;
     int x, y, w, h;
     bool visible = true;
+    std::wstring sourceFolder;
+    int sortCol = 0;        // 0=Name, 1=DateModified, 2=Size, 3=Type
+    bool sortAsc = true;
 };
 
 class FenceWindow {
@@ -59,6 +63,32 @@ public:
     /// While collapsed, re-apply the window height so a live-edited title bar
     /// height shows immediately (no-op when expanded).
     void SyncCollapsedSize();
+
+    // Display mode save/restore: called by the settings panel before/after
+    // switching between grid (0) and list (1) mode.
+    void SaveGridLayout();
+    void RestoreGridLayout();
+    void FitToListHeight();     // resize window to show all icons in list mode
+
+    // Folder mapping: replace fence contents with the files inside a folder,
+    // and watch it for live updates.
+    const std::wstring& SourceFolder() const { return m_sourceFolder; }
+    void MapToFolder(const std::wstring& folderPath);
+    void UnmapFolder();
+    void RefreshFromSource();
+
+    // Sort (mapped fences only): read/write the current sort column and
+    // direction. SetSort applies immediately + relayouts; SetSortPreset
+    // stores values for the next enumeration without re-sorting.
+    void SetSort(int column, bool ascending);
+    void SetSortPreset(int column, bool ascending);
+
+    // Search / filter (mapped fences only)
+    bool IsMapped() const { return !m_sourceFolder.empty(); }
+    float ContentTop() const;
+    int  SortColumn() const { return m_sortColumn; }
+    bool SortAscending() const { return m_sortAscending; }
+    void ClearSearch();
 
     static void RegisterClass(HINSTANCE hInst);
     /// The desktop window fences are parented to: Progman, or the WorkerW
@@ -172,6 +202,46 @@ private:
     std::wstring m_renameBuf;
     bool m_cursorVisible = false;
     UINT_PTR m_cursorTimer = 0;
+
+    // ── Display mode save/restore state ──
+    int  m_gridH = 0;
+    std::vector<std::pair<float, float>> m_gridPositions;
+
+    // List-mode scroll
+    float m_listScroll = 0;
+    bool  m_scrollbarDrag = false;
+    float m_scrollDragStartY = 0;
+    float m_scrollDragStartOffset = 0;
+    float ListMaxScroll() const;
+    void  ClampListScroll();
+
+    // ── Folder mapping (source folder + change notification) ──
+    std::wstring m_sourceFolder;
+    HANDLE m_changeHandle = INVALID_HANDLE_VALUE;
+    HANDLE m_changeThread = nullptr;
+    HANDLE m_stopEvent = nullptr;
+    void StartSourceWatch();
+    void StopSourceWatch();
+    void EnumerateSourceFolder(bool keepPositions);
+    static DWORD WINAPI ChangeThreadProc(LPVOID param);
+
+    // ── Sort state (mapped fences only) ──
+    int  m_sortColumn = 0;        // 0=Name, 1=DateModified, 2=Size, 3=Type
+    bool m_sortAscending = true;
+    bool m_sortInitialized = false;
+    void ApplySort();
+
+    // ── Search / filter (mapped fences only) ──
+    bool m_loading = false;   // shown during folder enumeration
+    std::wstring m_searchText;
+    bool m_searchFocused = false;
+    std::vector<int>  m_filterIdx;
+    std::vector<BYTE> m_filterBits;  // O(1) visibility for marquee/drag
+    bool SearchActive() const { return !m_searchText.empty(); }
+    int  VisibleCount() const;
+    void RebuildFilter();
+    void RelayoutFiltered();
+    void FocusSearch();
 
     // Collapse / expand (arrow in the title bar's top-right corner).
     // Caption-button semantics: the press only ARMS the button (plate shows);

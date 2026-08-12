@@ -3,6 +3,7 @@
 #include "context_menu.h"
 #include "menu_icons.h"
 #include "config.h"
+#include "explorer_sort.h"
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>     // IShellFolder, PIDL helpers (shell context menu)
@@ -241,6 +242,7 @@ FenceWindow::~FenceWindow() {
     // If the settings panel is open for this fence, tear it down first so it
     // never keeps referencing a fence that is going away.
     SettingsPanel::CloseActiveFor(this);
+    StopSourceWatch();
     // When explorer restarts, the desktop tree takes our child window down
     // with it — by the time we run, the HWND is already dead.
     if (!m_hwnd || !IsWindow(m_hwnd)) return;
@@ -254,6 +256,7 @@ void FenceWindow::Show() { m_appHidden = false; ShowWindow(m_hwnd, SW_SHOW); Red
 void FenceWindow::Hide() { m_appHidden = true;  ShowWindow(m_hwnd, SW_HIDE); }
 
 void FenceWindow::Redraw() {
+    ClampListScroll();
     std::wstring displayTitle = m_renaming
         ? (m_renameBuf + (m_cursorVisible ? L"|" : L""))
         : m_title;
@@ -266,12 +269,18 @@ void FenceWindow::Redraw() {
     // Explorer-style states: hover plate, selection plates, the translucent
     // "lifted" look for the whole dragged selection (only once the drag has
     // actually moved), and the rubber band while one is live.
+    FenceViewState view;
+    view.filter     = SearchActive() ? &m_filterIdx : nullptr;
+    view.searchText = IsMapped() ? &m_searchText : nullptr;
+    view.caretOn    = m_searchFocused && m_cursorVisible;
+    view.loading    = m_loading;
     m_render->DrawFence(displayTitle, m_icons, m_renaming, m_dragOver, m_collapsed,
                         m_collapsed ? -1 : m_hoverIcon,
                         &m_selectedPaths,
                         m_dragMoved && m_dragIcon >= 0,
                         showMarq ? &marq : nullptr,
-                        m_chevronHover, m_chevronDown);
+                        m_chevronHover, m_chevronDown,
+                        m_listScroll, &view);
     m_render->EndDraw();
     m_render->Present(m_hwnd, m_x, m_y);
 }
@@ -317,11 +326,15 @@ void FenceWindow::AddIcon(const std::wstring& name, const std::wstring& path,
 }
 
 int FenceWindow::HitTestIcon(int mx, int my) const {
-    const auto& app = m_render->Appearance();
+    IconGrid g = GetIconGrid();
+    float adjY = (float)my;
+    if (m_render->Appearance().displayMode == 1 && my >= (int)ContentTop())
+        adjY += m_listScroll;
     // Topmost icon wins → iterate in reverse draw order
     for (int i = (int)m_icons.size() - 1; i >= 0; i--) {
-        if ((float)mx >= m_icons[i].x && (float)mx < m_icons[i].x + app.cellW &&
-            (float)my >= m_icons[i].y && (float)my < m_icons[i].y + app.cellH)
+        if (SearchActive() && !m_filterBits[i]) continue;
+        if ((float)mx >= m_icons[i].x && (float)mx < m_icons[i].x + g.cw &&
+            adjY >= m_icons[i].y && adjY < m_icons[i].y + g.ch)
             return i;
     }
     return -1;
@@ -367,14 +380,15 @@ void FenceWindow::BringSelectedToFront() {
     m_icons.clear();
     for (auto& e : rest) m_icons.push_back(std::move(e));
     for (auto& e : sel)  m_icons.push_back(std::move(e));
+    if (SearchActive()) RebuildFilter();
 }
 
 void FenceWindow::ClampIconPos(float& x, float& y) const {
-    const auto& app = m_render->Appearance();
+    IconGrid g = GetIconGrid();
     float minX = kGridPad;
-    float minY = app.titleH + kGridPad;
-    float maxX = (float)m_render->Width()  - app.cellW - kGridPad;
-    float maxY = (float)m_render->Height() - app.cellH - kGridPad;
+    float minY = ContentTop() + kGridPad;
+    float maxX = (float)m_render->Width()  - g.cw - kGridPad;
+    float maxY = (float)m_render->Height() - g.ch - kGridPad;
     // (max)(…, minX) keeps the clamp sane if the fence is smaller than a cell
     x = (std::min)((std::max)(x, minX), (std::max)(maxX, minX));
     y = (std::min)((std::max)(y, minY), (std::max)(maxY, minY));
@@ -385,14 +399,23 @@ void FenceWindow::ClampIconPos(float& x, float& y) const {
 FenceWindow::IconGrid FenceWindow::GetIconGrid() const {
     const auto& app = m_render->Appearance();
     float W = (float)m_render->Width(), H = (float)m_render->Height();
+    float ct = ContentTop();
     IconGrid g;
-    g.cw = app.cellW; g.ch = app.cellH;
-    g.x0 = kGridPad;
-    g.y0 = app.titleH + kGridPad;
-    // Only whole cells count; any leftover margin stays free at the right and
-    // bottom edges (the desktop behaves the same).
-    g.cols = (std::max)(1, (int)((W - 2 * kGridPad) / g.cw));
-    g.rows = (std::max)(1, (int)((H - kGridPad - g.y0) / g.ch));
+    if (app.displayMode == 1) {   // list mode: single column, compact rows
+        g.cw = W - 2 * kGridPad;
+        g.ch = app.iconSize * 2.6f;  // one line of text + small icon + padding
+        g.x0 = kGridPad;
+        g.y0 = ct + kGridPad;
+        g.cols = 1;
+        int visRows = (std::max)(1, (int)((H - kGridPad - g.y0) / g.ch));
+        g.rows = (std::max)(visRows, VisibleCount());
+    } else {
+        g.cw = app.cellW; g.ch = app.cellH;
+        g.x0 = kGridPad;
+        g.y0 = ct + kGridPad;
+        g.cols = (std::max)(1, (int)((W - 2 * kGridPad) / g.cw));
+        g.rows = (std::max)(1, (int)((H - kGridPad - g.y0) / g.ch));
+    }
     return g;
 }
 
@@ -489,8 +512,61 @@ int FenceWindow::FindPushCell(int prefer, const std::vector<int>& occupied, int 
     return prefer;   // fence completely full — overlap unavoidable
 }
 
+void FenceWindow::SaveGridLayout() {
+    m_gridH = (int)m_render->Height();
+    m_gridPositions.clear();
+    m_gridPositions.reserve(m_icons.size());
+    for (const auto& ic : m_icons)
+        m_gridPositions.push_back({ic.x, ic.y});
+}
+
+void FenceWindow::RestoreGridLayout() {
+    if (SearchActive() || m_gridPositions.size() != m_icons.size()) return;
+    for (size_t i = 0; i < m_icons.size(); i++) {
+        m_icons[i].x = m_gridPositions[i].first;
+        m_icons[i].y = m_gridPositions[i].second;
+    }
+    if (m_gridH > 0) {
+        int th = (int)(m_render->Appearance().titleH + 0.5f);
+        int minH = th + (int)(40.0f * DpiScale() + 0.5f);
+        int h = (std::max)(m_gridH, minH);
+        int w = (int)m_render->Width();
+        SetWindowPos(m_hwnd, nullptr, 0, 0, w, h,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+float FenceWindow::ListMaxScroll() const {
+    const auto& app = m_render->Appearance();
+    if (app.displayMode != 1 || m_icons.empty()) return 0;
+    float rowH = app.iconSize * 2.6f;
+    float totalH = (float)VisibleCount() * rowH;
+    float contentH = (float)m_render->Height() - ContentTop();
+    return (std::max)(0.0f, totalH - contentH);
+}
+
+void FenceWindow::ClampListScroll() {
+    float maxS = ListMaxScroll();
+    if (m_listScroll > maxS) m_listScroll = maxS;
+    if (m_listScroll < 0) m_listScroll = 0;
+}
+
+void FenceWindow::FitToListHeight() {
+    if (m_icons.empty()) return;
+    const auto& app = m_render->Appearance();
+    float rowH = app.iconSize * 2.6f;
+    int ct = (int)(ContentTop() + 0.5f);
+    int neededH = ct + (int)(kGridPad + VisibleCount() * rowH + kGridPad + 0.5f);
+    int minH = ct + (int)(40.0f * DpiScale() + 0.5f);
+    neededH = (std::max)(neededH, minH);
+    int w = (int)m_render->Width();
+    SetWindowPos(m_hwnd, nullptr, 0, 0, w, neededH,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void FenceWindow::RelayoutIcons() {
-    if (m_collapsed) return;   // body is folded away; positions stay frozen
+    if (m_collapsed) return;
+    if (SearchActive()) { RelayoutFiltered(); return; }
     std::vector<int> taken;
     taken.reserve(m_icons.size());
     for (auto& ic : m_icons) {
@@ -584,7 +660,7 @@ RECT FenceWindow::MarqueeRect() const {
     // never paints over the title bar even when the captured cursor sweeps
     // above it, and it cannot leak past the window edges.
     int w = (int)m_render->Width(), h = (int)m_render->Height();
-    int top = (int)(m_render->Appearance().titleH + 0.5f);
+    int top = (int)(ContentTop() + 0.5f);
     int l = (std::min)(m_marqAX, m_marqCX), r = (std::max)(m_marqAX, m_marqCX);
     int t = (std::min)(m_marqAY, m_marqCY), b = (std::max)(m_marqAY, m_marqCY);
     l = (std::min)((std::max)(l, 0), w);
@@ -596,15 +672,20 @@ RECT FenceWindow::MarqueeRect() const {
 
 void FenceWindow::UpdateMarqueeSelection() {
     RECT band = MarqueeRect();
-    const auto& app = m_render->Appearance();
+    IconGrid g = GetIconGrid();
     std::vector<std::wstring> next;
     if (m_marqueeAdd) next = m_marqueeBase;   // Ctrl: keep what was selected
     next.reserve(next.size() + m_icons.size());
-    for (const auto& ic : m_icons) {
+    float adjY = 0;
+    if (m_render->Appearance().displayMode == 1) adjY = -m_listScroll;
+    for (int i = 0; i < (int)m_icons.size(); i++) {
+        const auto& ic = m_icons[i];
+        if (SearchActive() && !m_filterBits[i]) continue;
         // Test against the same cell rect HitTestIcon clicks against, and
         // count mere intersection (not containment) — desktop behavior.
-        RECT cell{ (long)ic.x, (long)ic.y,
-                   (long)(ic.x + app.cellW), (long)(ic.y + app.cellH) };
+        long visY = (long)(ic.y + adjY);
+        RECT cell{ (long)ic.x, visY,
+                   (long)(ic.x + g.cw), visY + (long)g.ch };
         RECT inter;
         if (!IntersectRect(&inter, &band, &cell)) continue;
         if (!ContainsPath(next, ic.path)) next.push_back(ic.path);
@@ -694,7 +775,255 @@ void FenceWindow::CaptureBackdrop() {
 }
 
 FenceData FenceWindow::GetData() const {
-    return { m_id, m_title, m_x, m_y, (int)m_render->Width(), (int)m_render->Height(), true };
+    return { m_id, m_title, m_x, m_y, (int)m_render->Width(), (int)m_render->Height(), true, m_sourceFolder, m_sortColumn, m_sortAscending };
+}
+
+// ── Sort ──
+
+static int CompareIcons(const IconEntry& a, const IconEntry& b,
+                        int column, bool asc) {
+    if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
+    int r = 0;
+    switch (column) {
+    case 1: // Date modified — newest first descending (Explorer default)
+        r = CompareFileTime(&a.lastWrite, &b.lastWrite); break;
+    case 2: // Size
+        r = a.size < b.size ? -1 : (a.size > b.size ? 1 : 0); break;
+    case 3: // Type (extension)
+        r = StrCmpLogicalW(a.ext.c_str(), b.ext.c_str()); break;
+    default: // Name
+        r = StrCmpLogicalW(a.name.c_str(), b.name.c_str()); break;
+    }
+    if (!asc) r = -r;
+    if (r == 0) r = StrCmpLogicalW(a.name.c_str(), b.name.c_str());
+    return r;
+}
+
+void FenceWindow::ApplySort() {
+    if (m_sourceFolder.empty()) return;
+    if (!m_sortInitialized) {
+        m_sortInitialized = true;
+        int col; bool asc;
+        if (QueryExplorerSortForFolder(m_sourceFolder, col, asc)) {
+            m_sortColumn = col; m_sortAscending = asc;
+            Config::MarkDirty();
+        }
+    }
+    std::stable_sort(m_icons.begin(), m_icons.end(),
+        [this](const IconEntry& a, const IconEntry& b) {
+            return CompareIcons(a, b, m_sortColumn, m_sortAscending) < 0;
+        });
+}
+
+void FenceWindow::SetSort(int column, bool ascending) {
+    m_sortColumn = column;
+    m_sortAscending = ascending;
+    m_sortInitialized = true;
+    if (!m_sourceFolder.empty()) {
+        ApplySort();
+        if (SearchActive()) RebuildFilter();
+        else {
+            for (auto& ic : m_icons) ic.x = ic.y = 0;
+            RelayoutIcons();
+        }
+        Config::MarkDirty();
+    }
+}
+
+void FenceWindow::SetSortPreset(int column, bool ascending) {
+    m_sortColumn = column;
+    m_sortAscending = ascending;
+    m_sortInitialized = true;
+}
+
+// ── Search / filter ──
+
+float FenceWindow::ContentTop() const {
+    const auto& app = m_render->Appearance();
+    return app.titleH + (IsMapped() ? app.searchH : 0.0f);
+}
+
+int FenceWindow::VisibleCount() const {
+    return SearchActive() ? (int)m_filterIdx.size() : (int)m_icons.size();
+}
+
+void FenceWindow::RebuildFilter() {
+    m_filterIdx.clear();
+    m_filterBits.assign(m_icons.size(), 0);
+    if (SearchActive()) {
+        for (int i = 0; i < (int)m_icons.size(); i++) {
+            if (StrStrIW(m_icons[i].name.c_str(), m_searchText.c_str())) {
+                m_filterIdx.push_back(i);
+                m_filterBits[i] = 1;
+            }
+        }
+    }
+    RelayoutFiltered();
+    Redraw();
+}
+
+void FenceWindow::RelayoutFiltered() {
+    if (!SearchActive()) { RelayoutIcons(); return; }
+    IconGrid g = GetIconGrid();
+    for (int k = 0; k < (int)m_filterIdx.size(); k++)
+        PlaceIconAt(m_icons[m_filterIdx[k]], k);
+}
+
+void FenceWindow::FocusSearch() {
+    if (!IsMapped() || m_renaming) return;
+    m_searchFocused = true;
+    m_cursorVisible = true;
+    if (m_cursorTimer) { KillTimer(m_hwnd, 1); m_cursorTimer = 0; }
+    m_cursorTimer = SetTimer(m_hwnd, 1, 530, nullptr);
+    // Attach thread input so SetFocus can reach this desktop child window
+    if (!m_focusAttached) {
+        HWND fg = GetForegroundWindow();
+        DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+        DWORD self_ = GetCurrentThreadId();
+        if (fgThread && fgThread != self_ && AttachThreadInput(self_, fgThread, TRUE))
+            m_focusAttached = fgThread;
+    }
+    SetFocus(m_hwnd);
+    Redraw();
+}
+
+void FenceWindow::ClearSearch() {
+    m_searchText.clear();
+    if (m_searchFocused) {
+        m_searchFocused = false;
+        m_cursorVisible = false;
+        if (m_cursorTimer) { KillTimer(m_hwnd, 1); m_cursorTimer = 0; }
+        if (m_focusAttached) {
+            AttachThreadInput(GetCurrentThreadId(), m_focusAttached, FALSE);
+            m_focusAttached = 0;
+        }
+    }
+    m_filterIdx.clear();
+    m_filterBits.clear();
+    RelayoutIcons();
+    Redraw();
+}
+
+// ── Folder mapping ──
+
+DWORD WINAPI FenceWindow::ChangeThreadProc(LPVOID param) {
+    auto* self = (FenceWindow*)param;
+    HANDLE handles[2] = { self->m_stopEvent, self->m_changeHandle };
+    for (;;) {
+        DWORD result = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+        if (result == WAIT_OBJECT_0) break;
+        if (result == WAIT_OBJECT_0 + 1) {
+            PostMessage(self->m_hwnd, WM_FENCE_REFRESH, 0, 0);
+            FindNextChangeNotification(self->m_changeHandle);
+        }
+    }
+    return 0;
+}
+
+void FenceWindow::StartSourceWatch() {
+    if (m_sourceFolder.empty() || m_changeHandle != INVALID_HANDLE_VALUE) return;
+    m_changeHandle = FindFirstChangeNotificationW(
+        m_sourceFolder.c_str(), FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+        FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE |
+        FILE_NOTIFY_CHANGE_ATTRIBUTES);
+    if (m_changeHandle == INVALID_HANDLE_VALUE) return;
+    m_stopEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!m_stopEvent) {
+        FindCloseChangeNotification(m_changeHandle);
+        m_changeHandle = INVALID_HANDLE_VALUE;
+        return;
+    }
+    m_changeThread = CreateThread(nullptr, 0, ChangeThreadProc, this, 0, nullptr);
+    if (!m_changeThread) {
+        CloseHandle(m_stopEvent); m_stopEvent = nullptr;
+        FindCloseChangeNotification(m_changeHandle); m_changeHandle = INVALID_HANDLE_VALUE;
+    }
+}
+
+void FenceWindow::StopSourceWatch() {
+    if (m_changeHandle == INVALID_HANDLE_VALUE) return;
+    SetEvent(m_stopEvent);
+    WaitForSingleObject(m_changeThread, 2000);
+    CloseHandle(m_changeThread); m_changeThread = nullptr;
+    CloseHandle(m_stopEvent); m_stopEvent = nullptr;
+    FindCloseChangeNotification(m_changeHandle); m_changeHandle = INVALID_HANDLE_VALUE;
+}
+
+void FenceWindow::MapToFolder(const std::wstring& folderPath) {
+    StopSourceWatch();
+    ClearSearch();
+    m_sourceFolder = folderPath;
+    if (folderPath.empty()) { Config::MarkDirty(); return; }
+    EnumerateSourceFolder(false);
+    StartSourceWatch();
+    Config::MarkDirty();
+}
+
+void FenceWindow::UnmapFolder() {
+    StopSourceWatch();
+    ClearSearch();
+    m_sourceFolder.clear();
+    Config::MarkDirty();
+}
+
+void FenceWindow::RefreshFromSource() {
+    if (m_sourceFolder.empty()) return;
+    if (m_dragIcon >= 0 || m_moving || m_resizeMask) return;
+    EnumerateSourceFolder(true);
+    Redraw();
+    Config::MarkDirty();
+}
+
+void FenceWindow::EnumerateSourceFolder(bool keepPositions) {
+    if (m_sourceFolder.empty()) return;
+
+    std::unordered_map<std::wstring, std::pair<float, float>> oldPos;
+    if (keepPositions) {
+        for (const auto& icon : m_icons) {
+            std::wstring key = icon.path;
+            for (auto& ch : key) ch = (wchar_t)::towlower(ch);
+            oldPos[key] = { icon.x, icon.y };
+        }
+    }
+
+    std::vector<IconEntry> newIcons;
+    std::wstring searchPath = m_sourceFolder + L"\\*";
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == L'\0' ||
+                (fd.cFileName[1] == L'.' && fd.cFileName[2] == L'\0')))
+                continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
+
+            IconEntry e;
+            e.name = fd.cFileName;
+            e.path = m_sourceFolder + L"\\" + fd.cFileName;
+            e.size = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            e.lastWrite = fd.ftLastWriteTime;
+            e.isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            e.ext = PathFindExtensionW(fd.cFileName);
+
+            if (keepPositions) {
+                std::wstring key = e.path;
+                for (auto& ch : key) ch = (wchar_t)::towlower(ch);
+                auto it = oldPos.find(key);
+                if (it != oldPos.end()) {
+                    e.x = it->second.first;
+                    e.y = it->second.second;
+                }
+            }
+            newIcons.push_back(std::move(e));
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
+
+    m_icons = std::move(newIcons);
+    ApplySort();
+    if (SearchActive()) RebuildFilter();
+    else              RelayoutIcons();
 }
 
 void FenceWindow::EnterRename() {
@@ -804,6 +1133,12 @@ static HRESULT CreateShellContextMenu(const std::wstring& path, IContextMenu** p
 
 // The fence-only verb is placed far above the shell's command-id range.
 static const int kCmdRemoveFromFence = 0x8001;
+static const int kCmdSortByName  = 0x8010;
+static const int kCmdSortByDate  = 0x8011;
+static const int kCmdSortByType  = 0x8012;
+static const int kCmdSortBySize  = 0x8013;
+static const int kCmdSortAsc     = 0x8014;
+static const int kCmdSortDesc    = 0x8015;
 
 // Shows the Explorer menu for `path` at `ptScreen` (screen coords) with a
 // "remove from fence" entry appended. Returns false only when no system menu
@@ -985,13 +1320,45 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_LBUTTONDOWN: {
         if (!self) return 0;
         int mx = GET_X_LPARAM(lp), my = GET_Y_LPARAM(lp);
+
+        // List-mode scrollbar hit test (before icon/chevron/move handling)
+        float maxS = self->ListMaxScroll();
+        if (maxS > 0) {
+            const auto& app = self->m_render->Appearance();
+            float bt = self->ContentTop();
+            float w = (float)self->m_render->Width();
+            float h = (float)self->m_render->Height();
+            float rowH = app.iconSize * 2.6f;
+            float sbW = 6.0f, sbPad = 2.0f;
+            float trackX = w - sbW - sbPad;
+            if ((float)mx >= trackX && (float)my >= bt) {
+                float trackH = h - bt - sbPad * 2;
+                float totalH = (float)self->VisibleCount() * rowH;
+                float contentH = h - bt;
+                float thumbH = (std::max)(20.0f, trackH * contentH / totalH);
+                float thumbY = bt + sbPad + (self->m_listScroll / maxS) * (trackH - thumbH);
+                if ((float)my < thumbY) {
+                    self->m_listScroll -= contentH;
+                    self->ClampListScroll();
+                    self->Redraw();
+                    return 0;
+                } else if ((float)my > thumbY + thumbH) {
+                    self->m_listScroll += contentH;
+                    self->ClampListScroll();
+                    self->Redraw();
+                    return 0;
+                } else {
+                    self->m_scrollbarDrag = true;
+                    self->m_scrollDragStartY = (float)my;
+                    self->m_scrollDragStartOffset = self->m_listScroll;
+                    SetCapture(hwnd);
+                    return 0;
+                }
+            }
+        }
+
         if (!self->m_renaming && my < (int)self->m_render->Appearance().titleH) {
             // Top-right corner of the title bar = collapse/expand arrow.
-            // Caption-button semantics: the press only ARMS the button (the
-            // pressed plate shows and capture is taken); the fence toggles
-            // on RELEASE, and only while the cursor is still over the
-            // button — press, drag away, release cancels, exactly like a
-            // real window caption button.
             int arrowL = (int)(self->m_render->Width() - self->m_render->Appearance().titleH);
             if (mx >= arrowL) {
                 self->m_chevronDown = true;
@@ -1002,10 +1369,17 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             // Rest of the title bar → drag the whole fence. Manual capture
             // drag: DefWindowProc's HTCAPTION loop doesn't move child windows.
-            self->m_moveOffX = mx;         // cursor offset from the origin
+            self->m_moveOffX = mx;
             self->m_moveOffY = my;
             self->m_moving = true;
             SetCapture(hwnd);
+            return 0;
+        }
+        // Search-box strip (mapped fences): focus the box on click, consume the event
+        if (self && !self->m_renaming && self->IsMapped() &&
+            my >= (int)self->m_render->Appearance().titleH &&
+            my < (int)self->ContentTop()) {
+            self->FocusSearch();
             return 0;
         }
         // Icon → select it and arm a drag inside the fence
@@ -1069,6 +1443,30 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 : EdgeHit(hwnd, self->m_collapsed, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
             SetCursor(LoadCursorW(nullptr, CursorForHT(ht)));
         }
+        // List-mode scrollbar thumb drag
+        if (self && self->m_scrollbarDrag) {
+            float dy = (float)GET_Y_LPARAM(lp) - self->m_scrollDragStartY;
+            float maxS = self->ListMaxScroll();
+            if (maxS > 0) {
+                const auto& app = self->m_render->Appearance();
+                float rowH = app.iconSize * 2.6f;
+                float bt = self->ContentTop();
+                float h = (float)self->m_render->Height();
+                float sbPad = 2.0f;
+                float trackH = h - bt - sbPad * 2;
+                float totalH = (float)self->VisibleCount() * rowH;
+                float contentH = h - bt;
+                float thumbH = (std::max)(20.0f, trackH * contentH / totalH);
+                float range = trackH - thumbH;
+                if (range > 0) {
+                    self->m_listScroll = self->m_scrollDragStartOffset + (dy / range) * maxS;
+                    self->ClampListScroll();
+                    self->Redraw();
+                }
+            }
+            return 0;
+        }
+
         // Hover plate (Explorer style). No capture is active in this branch,
         // so re-arm leave tracking on every move and hit-test the cursor.
         if (self && !self->m_collapsed && !self->m_moving &&
@@ -1196,12 +1594,12 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_LBUTTONUP: {
         if (!self) return 0;
+        if (self->m_scrollbarDrag) {
+            self->m_scrollbarDrag = false;
+            ReleaseCapture();
+            return 0;
+        }
         if (self->m_chevronDown) {
-            // The press only armed the button — the fence toggles here, on
-            // release, and only while the cursor is still over it. Capture
-            // routed the moves to us, so re-derive the position from the
-            // live cursor. ToggleCollapse redraws through WM_SIZE; the
-            // cancelled branch repaints to drop the pressed plate.
             self->m_chevronDown = false;
             ReleaseCapture();
             POINT p; GetCursorPos(&p); ScreenToClient(hwnd, &p);
@@ -1289,6 +1687,8 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             self->EnterRename();
             return 0;
         }
+        // Search-box strip: no action on double-click
+        if (self->IsMapped() && my < (int)self->ContentTop()) return 0;
         // Double-click on an icon → open it
         int hit = self->HitTestIcon(mx, my);
         if (hit >= 0) {
@@ -1330,6 +1730,7 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             self->m_icons.erase(self->m_icons.begin() + idx);
             if (self->m_hoverIcon == idx)      self->m_hoverIcon = -1;
             else if (self->m_hoverIcon > idx)  self->m_hoverIcon--;
+            if (self->SearchActive()) self->RebuildFilter();
             self->Redraw();
             Config::MarkDirty();
         };
@@ -1369,6 +1770,33 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, 2, Loc(L"Delete Fence", L"删除围栏"));
 
+        // Sort-by submenu (mapped fences only)
+        if (self && !self->m_sourceFolder.empty()) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            HMENU sortMenu = CreatePopupMenu();
+            auto addSortItem = [&](UINT id, int col, const wchar_t* en, const wchar_t* zh) {
+                UINT flags = MF_STRING;
+                if (self->m_sortColumn == col) flags |= MF_CHECKED;
+                AppendMenuW(sortMenu, flags, id, Loc(en, zh));
+            };
+            addSortItem(10, 0, L"Name", L"名称");
+            addSortItem(11, 1, L"Date modified", L"修改日期");
+            addSortItem(12, 3, L"Type", L"类型");
+            addSortItem(13, 2, L"Size", L"大小");
+            AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(sortMenu, MF_STRING | (self->m_sortAscending ? MF_CHECKED : 0),
+                        14, Loc(L"Ascending", L"升序"));
+            AppendMenuW(sortMenu, MF_STRING | (!self->m_sortAscending ? MF_CHECKED : 0),
+                        15, Loc(L"Descending", L"降序"));
+            AppendMenuW(menu, MF_POPUP, (UINT_PTR)sortMenu,
+                        Loc(L"Sort by", L"排序方式"));
+        }
+
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 5, Loc(L"Map Folder...", L"映射文件夹..."));
+        if (self && !self->m_sourceFolder.empty())
+            AppendMenuW(menu, MF_STRING, 6, Loc(L"Unmap Folder", L"取消映射"));
+
         // Fluent glyph icons. The set owns the HBITMAPs until the menu
         // interaction below has fully returned (MIIM_BITMAP is by reference).
         GlyphBitmapSet glyphs;
@@ -1386,6 +1814,9 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             icon(1, MenuGlyph::Pencil);    // Rename
             icon(4, MenuGlyph::Sliders);   // Appearance Settings
             icon(2, MenuGlyph::Trash);     // Delete Fence
+            icon(5, MenuGlyph::Folder);    // Map Folder
+            if (self && !self->m_sourceFolder.empty())
+                icon(6, MenuGlyph::Remove); // Unmap Folder
         }
 
         SetForegroundWindow(hwnd);
@@ -1409,15 +1840,84 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 break;
             case 3: eraseIcon(iconHit); break;
             case 4: SettingsPanel::Run(self); break;
+            case 5: {
+                CComPtr<IFileOpenDialog> pDlg;
+                if (SUCCEEDED(pDlg.CoCreateInstance(CLSID_FileOpenDialog))) {
+                    pDlg->SetOptions(FOS_PICKFOLDERS | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR);
+                    if (SUCCEEDED(pDlg->Show(hwnd))) {
+                        CComPtr<IShellItem> psi;
+                        if (SUCCEEDED(pDlg->GetResult(&psi))) {
+                            LPWSTR path = nullptr;
+                            if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                                int res = MessageBoxW(hwnd,
+                                    Loc(L"Mapping a folder will clear the current fence contents. Continue?",
+                                        L"映射文件夹将清空当前围栏内的内容，是否继续？"),
+                                    Loc(L"Map Folder", L"映射文件夹"),
+                                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+                                if (res == IDYES) {
+                                    self->GetRender().Appearance().displayMode = 1;
+                                    self->GetRender().RebuildStyles();
+                                    self->m_loading = true;
+                                    self->Redraw();
+                                    // Force paint before blocking enumeration
+                                    self->GetRender().BeginDraw();
+                                    self->GetRender().EndDraw();
+                                    self->GetRender().Present(self->m_hwnd, self->m_x, self->m_y);
+                                    self->MapToFolder(path);
+                                    self->m_loading = false;
+                                }
+                                CoTaskMemFree(path);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            case 6: self->UnmapFolder(); break;
+            case 10: case 11: case 12: case 13: {
+                // Column IDs map: 10=Name(0), 11=Date(1), 12=Type(3), 13=Size(2)
+                static const int colMap[] = { 0, 1, 3, 2 };
+                int col = colMap[cmd - 10];
+                bool natAsc = (col == 0 || col == 3);   // Name/Type default ascending
+                self->SetSort(col, natAsc);
+                break;
+            }
+            case 14: self->SetSort(self->m_sortColumn, true); break;
+            case 15: self->SetSort(self->m_sortColumn, false); break;
             }
         }
         return 0;
     }
 
+    case WM_MOUSEWHEEL: {
+        if (!self) return 0;
+        float maxS = self->ListMaxScroll();
+        if (maxS <= 0) return 0;
+        float rowH = self->m_render->Appearance().iconSize * 2.6f;
+        int steps = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+        self->m_listScroll -= steps * rowH * 3;
+        self->ClampListScroll();
+        self->Redraw();
+        return 0;
+    }
     case WM_CHAR:
         if (self && self->m_renaming && wp >= 32) {
             self->m_renameBuf += (wchar_t)wp;
             self->Redraw();
+        } else if (self && self->m_searchFocused) {
+            if (wp == 0x08) {   // backspace
+                if (!self->m_searchText.empty()) {
+                    self->m_searchText.pop_back();
+                    self->RebuildFilter();
+                }
+            } else if (wp >= 32) {
+                self->m_searchText += (wchar_t)wp;
+                self->RebuildFilter();
+            }
+        } else if (self && self->IsMapped() && wp >= 32) {
+            self->FocusSearch();
+            self->m_searchText += (wchar_t)wp;
+            self->RebuildFilter();
         }
         return 0;
 
@@ -1429,22 +1929,47 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 self->m_renameBuf.pop_back();
                 self->Redraw();
             }
+        } else if (self && self->m_searchFocused) {
+            if (wp == VK_ESCAPE) { self->ClearSearch(); }
+        } else if (self && self->IsMapped() && wp == 'F' &&
+                   (GetKeyState(VK_CONTROL) & 0x8000)) {
+            self->FocusSearch();
         }
         return 0;
 
     case WM_KILLFOCUS:
-        if (self) self->ExitRename(false);
+        if (self) {
+            if (self->m_renaming)
+                self->ExitRename(false);
+            else if (self->m_searchFocused) {
+                self->m_searchFocused = false;
+                self->m_cursorVisible = false;
+                if (self->m_cursorTimer) { KillTimer(hwnd, 1); self->m_cursorTimer = 0; }
+                if (self->m_focusAttached) {
+                    AttachThreadInput(GetCurrentThreadId(), self->m_focusAttached, FALSE);
+                    self->m_focusAttached = 0;
+                }
+                self->Redraw();
+            }
+        }
         return 0;
 
     case WM_TIMER:
         if (!self) return 0;
-        if (wp == 1 && self->m_renaming) {
+        if (wp == 1 && (self->m_renaming || self->m_searchFocused)) {
             self->m_cursorVisible = !self->m_cursorVisible;
             self->Redraw();
         } else if (wp == 2) {
             KillTimer(hwnd, 2);
             self->CaptureBackdrop();
+        } else if (wp == 5) {
+            KillTimer(hwnd, 5);
+            self->RefreshFromSource();
         }
+        return 0;
+
+    case WM_FENCE_REFRESH:
+        if (self) SetTimer(hwnd, 5, 500, nullptr);
         return 0;
 
     case WM_SHOWWINDOW:
@@ -1472,7 +1997,7 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return DefWindowProc(hwnd, msg, wp, lp);
 
     case WM_DESTROY:
-        if (self) { SetWindowLongPtr(hwnd, GWLP_USERDATA, 0); }
+        if (self) { self->StopSourceWatch(); SetWindowLongPtr(hwnd, GWLP_USERDATA, 0); }
         return 0;
     }
     return DefWindowProc(hwnd, msg, wp, lp);

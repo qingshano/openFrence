@@ -332,7 +332,11 @@ static void RebuildFences() {
     g_fences.clear();   // dtors see the dead HWNDs and skip DestroyWindow
     for (auto& s : saved) {
         auto f = std::make_unique<FenceWindow>(s.data);
-        f->SetIcons(s.icons);
+        if (!s.data.sourceFolder.empty()) {
+            f->SetSortPreset(s.data.sortCol, s.data.sortAsc);
+            f->MapToFolder(s.data.sourceFolder);
+        } else
+            f->SetIcons(s.icons);
         if (s.collapsed) f->ToggleCollapse();
         if (g_allHidden) f->Hide();
         g_fences.push_back(std::move(f));

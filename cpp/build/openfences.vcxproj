@@ -360,6 +360,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClCompile Include="D:\person\openFences\cpp\src\icon_extract.cpp" />
     <ClCompile Include="D:\person\openFences\cpp\src\menu_icons.cpp" />
     <ClCompile Include="D:\person\openFences\cpp\src\config.cpp" />
+    <ClCompile Include="D:\person\openFences\cpp\src\explorer_sort.cpp" />
     <ResourceCompile Include="D:\person\openFences\cpp\src\app.rc" />
     <Natvis Include="D:\person\openFences\cpp\build\_deps\json-src\nlohmann_json.natvis">
     </Natvis>

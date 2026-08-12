@@ -18,6 +18,7 @@ enum : int {
     HIT_PANEL_MORE = 140, HIT_TITLE_MORE = 141,
     HIT_TITLEH_MINUS, HIT_TITLEH_PLUS,
     HIT_TITLEPOS0 = 160,           // +0 left, +1 center, +2 right
+    HIT_DISPMODE0 = 180,           // +0 grid, +1 list
     HIT_DELETE_FENCE = 200,
 };
 
@@ -113,7 +114,7 @@ SettingsPanel::SettingsPanel(FenceWindow* fence) : m_fence(fence) {
     int waH = mi.rcWork.bottom - mi.rcWork.top;
 
     m_fontRows = 5;
-    auto heightFor = [&](int rows) { return (int)((471 + rows * 26) * m_s); };
+    auto heightFor = [&](int rows) { return (int)((527 + rows * 26) * m_s); };
     m_panelH = heightFor(m_fontRows);
     while (m_panelH > waH && m_fontRows > 3) { m_fontRows--; m_panelH = heightFor(m_fontRows); }
     m_panelW = (int)(360 * m_s);
@@ -345,9 +346,17 @@ void SettingsPanel::ComputeLayout() {
     m_thPlus = R(cx + cw - btn, stY, btn, btn);
     addHit(HIT_TITLEH_PLUS, m_thPlus);
 
+    // Display mode (grid / list) — 2-way segmented control
+    m_displayModeLblY = listBot + 344 * s;
+    float dmSegW = (cw - 4 * s) / 2, dmY = listBot + 362 * s;
+    for (int i = 0; i < 2; i++) {
+        m_displayModeSeg[i] = R(cx + i * (dmSegW + 4 * s), dmY, dmSegW, 26 * s);
+        addHit(HIT_DISPMODE0 + i, m_displayModeSeg[i]);
+    }
+
     // Separator + delete (language lives in the tray menu, not here)
-    m_sepY = listBot + 344 * s;
-    m_deleteBtn = R(cx, listBot + 356 * s, cw, 30 * s);
+    m_sepY = listBot + 400 * s;
+    m_deleteBtn = R(cx, listBot + 412 * s, cw, 30 * s);
     addHit(HIT_DELETE_FENCE, m_deleteBtn);
 }
 
@@ -515,6 +524,26 @@ void SettingsPanel::DrawPanel() {
 
     // ── Title bar height stepper ──
     drawLabel(Loc(L"Title Bar Height", L"标题栏高度"), m_thLblY);
+
+    // ── Display mode (grid / list) ──
+    drawLabel(Loc(L"Display Mode", L"显示方式"), m_displayModeLblY);
+    {
+        const wchar_t* dmLabels[2] = {
+            Loc(L"Grid", L"网格"), Loc(L"List", L"列表"),
+        };
+        int dm = m_fence->GetRender().Appearance().displayMode;
+        for (int i = 0; i < 2; i++) {
+            bool active = (dm == i);
+            fillRR(m_displayModeSeg[i], 6 * s, active ? m_brAccent.p : m_brField.p);
+            if (!active && m_hover == HIT_DISPMODE0 + i)
+                t->DrawRoundedRectangle(D2D1_ROUNDED_RECT{RF(m_displayModeSeg[i]), 6 * s, 6 * s},
+                    m_brHover.p, 2.0f);
+            drawStr(dmLabels[i], m_displayModeSeg[i], m_fmtCenter.p,
+                active ? m_brThumb.p : m_brText2.p);
+        }
+    }
+
+    // ── Title bar height stepper ──
     fillRR(m_thMinus, 6 * s, m_brField.p);
     if (m_hover == HIT_TITLEH_MINUS)
         t->DrawRoundedRectangle(D2D1_ROUNDED_RECT{RF(m_thMinus), 6 * s, 6 * s}, m_brHover.p, 2.0f);
@@ -703,6 +732,25 @@ void SettingsPanel::OnLButtonDown(int mx, int my) {
     }
     case HIT_PANEL_MORE:    ChoosePanelColor(); break;
     case HIT_TITLE_MORE:    ChooseTitleColor(); break;
+    case HIT_DISPMODE0: case HIT_DISPMODE0 + 1: {
+        auto& app = m_fence->GetRender().Appearance();
+        int mode = id - HIT_DISPMODE0;
+        if (app.displayMode != mode) {
+            if (mode == 1) {   // switching to list: save grid layout
+                m_fence->SaveGridLayout();
+            }
+            app.displayMode = mode;
+            ApplyToFence();
+            if (mode == 1) {
+                m_fence->RelayoutIcons();
+            } else {
+                m_fence->RestoreGridLayout();
+                m_fence->RelayoutIcons();
+            }
+            Repaint();
+        }
+        break;
+    }
     default:
         if (id >= HIT_PANEL_SWATCH0 && id < HIT_PANEL_SWATCH0 + 8) SetPanelColor(id - HIT_PANEL_SWATCH0);
         else if (id >= HIT_TITLE_SWATCH0 && id < HIT_TITLE_SWATCH0 + 8) SetTitleColor(id - HIT_TITLE_SWATCH0);
