@@ -50,6 +50,7 @@ RenderContext::RenderContext(UINT w, UINT h) : m_width(w), m_height(h) {
     CreateBrushes();
     CreateTextFormats();
     BuildChevronPath();
+    BuildTitleBarPaths();
     CreateDibDC();
 }
 
@@ -234,6 +235,56 @@ void RenderContext::BuildChevronPath() {
     m_chevronPath = path;
 }
 
+void RenderContext::BuildTitleBarPaths() {
+    m_titleBarPath.Release();
+    m_topHiPath.Release();
+    if (!m_d2dFactory) return;
+    const float w = (float)m_width, th = m_app.titleH;
+    // Match D2D's rounded-rect clamp: a radius larger than half a side
+    // collapses, so the window's real top arc is min(r, w/2, h/2).
+    const float effR = (std::min)(m_app.r,
+        (std::min)((std::min)(w, (float)m_height) * 0.5f, th));
+    if (effR <= 0.5f) return;   // degenerate — caller falls back to plain rects
+
+    CComPtr<ID2D1PathGeometry> title;
+    if (FAILED(m_d2dFactory->CreatePathGeometry(&title)) || !title) return;
+    CComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(title->Open(&sink)) || !sink) return;
+    sink->BeginFigure({0.0f, effR}, D2D1_FIGURE_BEGIN_FILLED);
+    D2D1_ARC_SEGMENT arc = {};
+    arc.size = {effR, effR};
+    arc.rotationAngle = 0.0f;
+    arc.sweepDirection = D2D1_SWEEP_DIRECTION_CLOCKWISE;
+    arc.arcSize = D2D1_ARC_SIZE_SMALL;
+    arc.point = {effR, 0.0f};      // top-left arc: left edge → top edge
+    sink->AddArc(arc);
+    sink->AddLine({w - effR, 0.0f});
+    arc.point = {w, effR};         // top-right arc
+    sink->AddArc(arc);
+    sink->AddLine({w, th});
+    sink->AddLine({0.0f, th});
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+    m_titleBarPath = title;
+
+    // Highlight strip clipped to the rounded shape (rect ∩ title path), so
+    // it cannot poke into the transparent corner cutouts.
+    CComPtr<ID2D1RectangleGeometry> stripRect;
+    if (FAILED(m_d2dFactory->CreateRectangleGeometry(
+            D2D1_RECT_F{0.0f, 0.0f, w, 1.5f}, &stripRect)) || !stripRect) return;
+    CComPtr<ID2D1PathGeometry> strip;
+    if (FAILED(m_d2dFactory->CreatePathGeometry(&strip)) || !strip) return;
+    CComPtr<ID2D1GeometrySink> ssink;
+    if (FAILED(strip->Open(&ssink)) || !ssink) return;
+    if (FAILED(m_titleBarPath->CombineWithGeometry(stripRect.p,
+            D2D1_COMBINE_MODE_INTERSECT, nullptr, 0.25f, ssink.p))) {
+        ssink->Close();
+        return;
+    }
+    ssink->Close();
+    m_topHiPath = strip;
+}
+
 bool RenderContext::CreateTextFormats() {
     m_dwFactory->CreateTextFormat(m_app.fontName, nullptr,
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
@@ -288,6 +339,7 @@ void RenderContext::RebuildStyles() {
     CreateBrushes();
     CreateTextFormats();
     BuildChevronPath();   // geometry follows the (possibly changed) titleH
+    BuildTitleBarPaths();
     // Label metrics depend on the icon text format — stale after a rebuild.
     m_selLabelPath.clear();
 }
@@ -667,7 +719,10 @@ bool RenderContext::DrawFence(const std::wstring& title,
         } else {
             ctx.FillRoundedRectangle(rr, m_titleBrush.p);
         }
-        if (m_topHiBrush) ctx.FillRectangle(D2D1_RECT_F{0, 0, w, 1.5f}, m_topHiBrush.p);
+        if (m_topHiBrush) {
+            if (m_topHiPath) ctx.FillGeometry(m_topHiPath.p, m_topHiBrush.p);
+            else ctx.FillRectangle(D2D1_RECT_F{0, 0, w, 1.5f}, m_topHiBrush.p);
+        }
         // Left-aligned titles get a left inset only; center/right-aligned
         // ones get symmetric insets so the alignment reads correctly within
         // the visible title region (right edge stops before the chevron box).
@@ -688,18 +743,24 @@ bool RenderContext::DrawFence(const std::wstring& title,
     }
     ctx.FillRoundedRectangle(rr, m_bgBrush.p);
 
-    // ── Title bar (flat rectangle on top, extends edge to edge) ──
+    // ── Title bar ──
+    // A flat FillRectangle would paint square corners over the window's
+    // rounded top shape; the cached path carries the same top arcs.
     D2D1_RECT_F titleRect{0, 0, w, th};
+    CComPtr<ID2D1SolidColorBrush> eb;
+    ID2D1Brush* titleFill = m_titleBrush.p;
     if (renaming) {
-        CComPtr<ID2D1SolidColorBrush> eb;
         ctx.CreateSolidColorBrush(D2D1::ColorF(0.10f, 0.22f, 0.42f, 0.92f), &eb);
-        ctx.FillRectangle(titleRect, eb.p);
-    } else {
-        ctx.FillRectangle(titleRect, m_titleBrush.p);
+        if (eb) titleFill = eb.p;
     }
+    if (m_titleBarPath) ctx.FillGeometry(m_titleBarPath.p, titleFill);
+    else ctx.FillRectangle(titleRect, titleFill);
 
     // ── Top highlight (subtle 3D edge) — cached brush, redraws are hot ──
-    if (m_topHiBrush) ctx.FillRectangle(D2D1_RECT_F{0, 0, w, 1.5f}, m_topHiBrush.p);
+    if (m_topHiBrush) {
+        if (m_topHiPath) ctx.FillGeometry(m_topHiPath.p, m_topHiBrush.p);
+        else ctx.FillRectangle(D2D1_RECT_F{0, 0, w, 1.5f}, m_topHiBrush.p);
+    }
 
     // ── Separator ──
     D2D1_RECT_F sepRect{0, th - 0.5f, w, th + 0.5f};

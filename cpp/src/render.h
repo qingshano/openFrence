@@ -139,6 +139,7 @@ private:
     bool CreateBrushes();
     bool CreateTextFormats();
     void BuildChevronPath();
+    void BuildTitleBarPaths();
     bool CopyWicToDib();
     bool CreateDibDC();
     void ScaleAppearance();   // grow 96-DPI design metrics to physical pixels
@@ -177,6 +178,11 @@ private:
     // DrawFence flips it for the collapsed state. Rebuilt with the styles
     // because its geometry follows the title-bar height.
     CComPtr<ID2D1PathGeometry>  m_chevronPath;
+    // Title bar fill + top highlight strip as cached paths carrying the
+    // window's top corner arcs — a flat rect would paint square corners over
+    // the rounded body shape. Rebuilt with the styles and on Resize.
+    CComPtr<ID2D1PathGeometry>  m_titleBarPath;
+    CComPtr<ID2D1PathGeometry>  m_topHiPath;
     CComPtr<ID2D1SolidColorBrush> m_chevronBrush;  // dim idle, brightens on hover
     CComPtr<ID2D1SolidColorBrush> m_chevronPlate;  // caption-button hover/press plate
 

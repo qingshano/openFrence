@@ -410,6 +410,11 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 // ── Entry ──
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+    // 第二个实例会把围栏重复绘制在同一桌面上；命名互斥体保证只有一个实例
+    // （进程崩溃时系统自动释放，不会留下死锁）。
+    HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"openFences_SingleInstance");
+    if (!singleInstance || GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+
     EnableDpiAwareness();
     ComInit com;
     InitCommonControls();
