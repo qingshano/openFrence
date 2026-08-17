@@ -75,6 +75,12 @@ struct FenceViewState {
     const std::wstring* searchText = nullptr;   // null = no search box
     bool caretOn = false;
     bool loading = false;
+    // In-place icon rename: the index of the icon being renamed and its live
+    // text. Its label is replaced by an Explorer-style edit box; renameCaret
+    // is the insertion offset inside iconRenameText (-1 = caret hidden).
+    int renameIcon = -1;
+    const std::wstring* iconRenameText = nullptr;
+    int renameCaret = -1;
 };
 
 class RenderContext {

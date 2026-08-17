@@ -380,8 +380,12 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // One live measurement per tick, shared by all fences (the query
             // opens explorer's process — not worth repeating per fence).
             int px = QueryDesktopIconSizePx();
-            if (px > 0)
-                for (auto& f : g_fences) f->SyncDesktopIconSize(px);
+            for (auto& f : g_fences) {
+                // Display topology changes move the desktop icon list; keep
+                // every fence at its saved screen position.
+                f->RestoreAnchor();
+                if (px > 0) f->SyncDesktopIconSize(px);
+            }
             return 0;
         }
         if (wp == 3) {   // config save debounce (Config::MarkDirty)

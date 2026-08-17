@@ -22,6 +22,30 @@ const wchar_t* FenceWindow::Loc(const wchar_t* en, const wchar_t* zh) {
 // Inset between the fence border and the icon grid (also the free-drag clamp)
 static const float kGridPad = 4.0f;
 
+// ── TEMP DEBUG: new-menu diagnostics ──
+static void NewDbg(const wchar_t* fmt, ...) {
+    wchar_t buf[1024];
+    va_list ap; va_start(ap, fmt);
+    _vsnwprintf_s(buf, _TRUNCATE, fmt, ap);
+    va_end(ap);
+    FILE* f = _wfopen(L"D:\\person\\openFences\\newmenu_dbg.log", L"a, ccs=UTF-8");
+    if (f) { fwprintf(f, L"%s\r\n", buf); fclose(f); }
+}
+static void NewDbgDumpMenu(HMENU m, int depth) {
+    int n = GetMenuItemCount(m);
+    for (int i = 0; i < n; i++) {
+        MENUITEMINFOW mii = { sizeof(mii) };
+        mii.fMask = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU | MIIM_STRING;
+        wchar_t text[256] = {};
+        mii.dwTypeData = text; mii.cch = 256;
+        if (!GetMenuItemInfoW(m, i, TRUE, &mii)) continue;
+        NewDbg(L"  %*s[%d] id=%u type=0x%x sub=%d text=\"%s\"",
+               depth * 2, L"", i, mii.wID, mii.fType,
+               mii.hSubMenu ? 1 : 0, text);
+        if (mii.hSubMenu && depth < 2) NewDbgDumpMenu(mii.hSubMenu, depth + 1);
+    }
+}
+
 // Process is DPI-aware (see main.cpp), so this returns the real scale factor
 static float DpiScale() {
     HDC h = GetDC(nullptr);
@@ -274,6 +298,13 @@ void FenceWindow::Redraw() {
     view.searchText = IsMapped() ? &m_searchText : nullptr;
     view.caretOn    = m_searchFocused && m_cursorVisible;
     view.loading    = m_loading;
+    std::wstring iconRenameDisplay;
+    if (m_renameIcon >= 0) {
+        iconRenameDisplay = m_iconRenameBuf + m_iconRenameExt;
+        view.renameIcon = m_renameIcon;
+        view.iconRenameText = &iconRenameDisplay;
+        view.renameCaret = m_cursorVisible ? (int)m_iconRenameCaret : -1;
+    }
     m_render->DrawFence(displayTitle, m_icons, m_renaming, m_dragOver, m_collapsed,
                         m_collapsed ? -1 : m_hoverIcon,
                         &m_selectedPaths,
@@ -742,6 +773,46 @@ void FenceWindow::ScheduleBackdropRefresh() {
     SetTimer(m_hwnd, 2, 150, nullptr);
 }
 
+void FenceWindow::RestoreAnchor() {
+    if (!m_hwnd || !IsWindow(m_hwnd)) return;
+    if (m_moving || m_resizeMask || m_dragIcon >= 0 || m_marquee) return;
+    RECT wr;
+    if (!GetWindowRect(m_hwnd, &wr)) return;
+
+    int w = (int)m_render->Width(), h = (int)m_render->Height();
+
+    // An anchor that touches no monitor at all (its monitor was unplugged,
+    // or the config was saved under a different topology) would leave the
+    // fence unreachable — park it on the nearest monitor's work area. A
+    // fence the user dragged only partially off-screen still intersects its
+    // monitor, so deliberate placements are left alone.
+    RECT anchor{ m_x, m_y, m_x + w, m_y + h };
+    POINT c{ m_x + w / 2, m_y + h / 2 };
+    HMONITOR mon = MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    RECT hit = {};
+    if (mon && GetMonitorInfoW(mon, &mi) &&
+        !IntersectRect(&hit, &anchor, &mi.rcMonitor)) {
+        RECT wa = mi.rcWork;
+        int nx = (std::min)((std::max)(m_x, (int)wa.left),
+                            (std::max)((int)wa.left, (int)wa.right - w));
+        int ny = (std::min)((std::max)(m_y, (int)wa.top),
+                            (std::max)((int)wa.top, (int)wa.bottom - h));
+        if (nx != m_x || ny != m_y) {
+            m_x = nx; m_y = ny;
+            Config::MarkDirty();   // the clamped spot becomes the new saved position
+        }
+    }
+    if (wr.left == m_x && wr.top == m_y) return;   // in place, nothing to do
+
+    HWND parent = GetParent(m_hwnd);
+    POINT p{ m_x, m_y };
+    if (parent) ScreenToClient(parent, &p);
+    SetWindowPos(m_hwnd, nullptr, p.x, p.y, 0, 0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    ScheduleBackdropRefresh();   // the pixels behind the fence changed
+}
+
 void FenceWindow::CaptureBackdrop() {
     int w = (int)m_render->Width(), h = (int)m_render->Height();
     if (w <= 0 || h <= 0) return;
@@ -1059,6 +1130,74 @@ void FenceWindow::ExitRename(bool commit) {
     Redraw();
 }
 
+void FenceWindow::EnterIconRename(int idx) {
+    if (idx < 0 || idx >= (int)m_icons.size() || m_renaming || m_collapsed) return;
+    m_renameIcon = idx;
+    // Explorer semantics: the base name comes up selected (typing replaces
+    // it) while the extension stays fixed. Folders have no extension.
+    const std::wstring& full = m_icons[idx].name;
+    m_iconRenameExt = m_icons[idx].isDir ? L"" : PathFindExtensionW(full.c_str());
+    m_iconRenameBuf = full.substr(0, full.size() - m_iconRenameExt.size());
+    m_iconRenameCaret = m_iconRenameBuf.size();
+    m_iconRenamePristine = true;
+    m_cursorVisible = true;
+    if (!m_cursorTimer) m_cursorTimer = SetTimer(m_hwnd, 1, 530, nullptr);
+    // Same focus trick as the title rename: a desktop child can only hold
+    // keyboard focus with our input queue attached to the foreground thread.
+    HWND fg = GetForegroundWindow();
+    DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD self_ = GetCurrentThreadId();
+    if (fgThread && fgThread != self_ && AttachThreadInput(self_, fgThread, TRUE))
+        m_focusAttached = fgThread;
+    SetFocus(m_hwnd);
+    NewDbg(L"EnterIconRename idx=%d fg=0x%p attach=%d focus=0x%p",
+           idx, fg, m_focusAttached != 0, GetFocus());
+    Redraw();
+}
+
+void FenceWindow::ExitIconRename(bool commit) {
+    if (m_renameIcon < 0) return;
+    int idx = m_renameIcon;
+    m_renameIcon = -1;
+    NewDbg(L"ExitIconRename commit=%d buf=\"%s\" ext=\"%s\"",
+           commit, m_iconRenameBuf.c_str(), m_iconRenameExt.c_str());
+    if (commit && idx < (int)m_icons.size()) {
+        std::wstring newName = m_iconRenameBuf + m_iconRenameExt;
+        if (newName != m_icons[idx].name) {
+            std::wstring oldPath = m_icons[idx].path;
+            size_t slash = oldPath.find_last_of(L'\\');
+            // Invalid names (empty, reserved chars) fail MoveFileW — then the
+            // icon simply keeps its old name, like Explorer's error would.
+            if (slash != std::wstring::npos && !m_iconRenameBuf.empty()) {
+                std::wstring newPath = oldPath.substr(0, slash + 1) + newName;
+                NewDbg(L"MoveFileW \"%s\" -> \"%s\"", oldPath.c_str(), newPath.c_str());
+                if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
+                    m_icons[idx].name = newName;
+                    m_icons[idx].path = newPath;
+                    m_icons[idx].ext = PathFindExtensionW(newPath.c_str());
+                    for (auto& p : m_selectedPaths)
+                        if (p == oldPath) p = newPath;
+                    // Mapped fences re-enumerate via the change watcher;
+                    // updating the entry now keeps the label right until it
+                    // fires (the watcher's keep-positions pass sees the new
+                    // path).
+                    Config::MarkDirty();
+                } else {
+                    NewDbg(L"MoveFileW FAILED err=%u", GetLastError());
+                }
+            }
+        }
+    }
+    if (!m_renaming && !m_searchFocused) {
+        if (m_cursorTimer) { KillTimer(m_hwnd, 1); m_cursorTimer = 0; }
+        if (m_focusAttached) {
+            AttachThreadInput(GetCurrentThreadId(), m_focusAttached, FALSE);
+            m_focusAttached = 0;
+        }
+    }
+    Redraw();
+}
+
 // Edge hit-test shared by WM_NCHITTEST (resize behavior) and cursor picking.
 // Returns HTLEFT/HTRIGHT/… near a border, HTCLIENT anywhere in the body.
 // `collapsed` fences are a bare title pill — nothing to resize there.
@@ -1131,6 +1270,59 @@ static HRESULT CreateShellContextMenu(const std::wstring& path, IContextMenu** p
     return hr;
 }
 
+// ── "New" submenu (the shell's own NewMenuHandler) ──
+//
+// Explorer's 新建 submenu is produced by the handler registered under
+// HKCR\Directory\Background\shellex\ContextMenuHandlers\New (stable CLSID
+// since Win2000). Instantiating it directly yields the exact system menu —
+// localized labels, third-party ShellNew templates — and InvokeCommand
+// creates the file in the folder the handler was initialized with. Passing
+// the desktop PIDL (not a plain folder path) makes the handler recognize the
+// desktop, so it adds the desktop-only entries like 快捷方式.
+static const CLSID kCLSID_NewMenu = { 0xD969A300, 0xE7FF, 0x11D0,
+                                      { 0xA9, 0x3B, 0x00, 0xA0, 0xC9, 0x0F, 0x27, 0x19 } };
+
+// Command-id base the handler owns inside the fence menu (above our own ids).
+static const int kCmdNewFirst = 0x200;
+
+// Set while a 新建 menu session is live so the fence wndproc can forward the
+// menu messages the handler needs (Explorer does the same forwarding).
+static IContextMenu* s_activeNewCM = nullptr;
+
+// The shell handler creates the file but doesn't tell us its final name
+// ("新建 文本文档 (2).txt" on collisions), so diff the folder's names
+// around the invocation to find it.
+static void SnapshotFolderNames(const std::wstring& dir, std::vector<std::wstring>& out) {
+    if (dir.empty()) return;
+    std::wstring sp = dir + L"\\*";
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(sp.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { out.push_back(fd.cFileName); } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+}
+
+static HRESULT CreateNewMenuHandler(PCIDLIST_ABSOLUTE pidlFolder, IContextMenu** ppCM) {
+    *ppCM = nullptr;
+
+    CComPtr<IContextMenu> spCM;
+    HRESULT hr = spCM.CoCreateInstance(kCLSID_NewMenu, nullptr, CLSCTX_INPROC_SERVER);
+    NewDbg(L"CreateNewMenuHandler: pidl=%p isEmpty=%d CoCreate=0x%08X",
+           pidlFolder, pidlFolder ? ILIsEmpty(pidlFolder) : -1, (unsigned)hr);
+    if (SUCCEEDED(hr)) {
+        CComPtr<IShellExtInit> spInit;
+        hr = spCM.QueryInterface(&spInit);
+        NewDbg(L"  QI IShellExtInit=0x%08X", (unsigned)hr);
+        if (SUCCEEDED(hr)) {
+            hr = spInit->Initialize(pidlFolder, nullptr, nullptr);
+            NewDbg(L"  Initialize=0x%08X", (unsigned)hr);
+        }
+    }
+    if (SUCCEEDED(hr)) *ppCM = spCM.Detach();
+    return hr;
+}
+
 // The fence-only verb is placed far above the shell's command-id range.
 static const int kCmdRemoveFromFence = 0x8001;
 static const int kCmdSortByName  = 0x8010;
@@ -1143,11 +1335,14 @@ static const int kCmdSortDesc    = 0x8015;
 // Shows the Explorer menu for `path` at `ptScreen` (screen coords) with a
 // "remove from fence" entry appended. Returns false only when no system menu
 // could be produced (caller falls back to the plain fence menu). Sets
-// `invoked` when a shell command ran and `removeChosen` for our own verb.
+// `invoked` when a shell command ran, `removeChosen` for our own verb, and
+// `renameChosen` when the shell's 重命名 verb was picked (the caller starts
+// the fence's in-place rename instead of handing it to Explorer).
 static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
                                 const std::wstring& displayName, POINT ptScreen,
-                                bool& invoked, bool& removeChosen) {
-    invoked = removeChosen = false;
+                                bool& invoked, bool& removeChosen,
+                                bool& renameChosen) {
+    invoked = removeChosen = renameChosen = false;
 
     CComPtr<IContextMenu> spCM;
     if (FAILED(CreateShellContextMenu(path, &spCM)) || !spCM) return false;
@@ -1159,6 +1354,28 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
                                       CMF_EXPLORE | CMF_CANRENAME))) {
         DestroyMenu(menu);
         return false;
+    }
+    NewDbg(L"--- shell file menu for \"%s\" ---", path.c_str());
+    NewDbgDumpMenu(menu, 0);
+    NewDbg(L"--- end ---");
+
+    // The shell's rename verb would start Explorer's rename in ITS view
+    // (invisible when desktop icons are hidden); intercept its command id so
+    // the fence renames in place instead.
+    int renameCmdId = 0;
+    int itemCount = GetMenuItemCount(menu);
+    for (int i = 0; i < itemCount; i++) {
+        MENUITEMINFOW mii = { sizeof(mii) };
+        mii.fMask = MIIM_ID | MIIM_SUBMENU;
+        if (!GetMenuItemInfoW(menu, i, TRUE, &mii)) continue;
+        if (mii.hSubMenu || !mii.wID || mii.wID > 0x7FFF) continue;
+        char verb[64] = {};
+        if (SUCCEEDED(spCM->GetCommandString(mii.wID - 1, GCS_VERBA, nullptr,
+                                             verb, sizeof(verb))) &&
+            lstrcmpiA(verb, "rename") == 0) {
+            renameCmdId = (int)mii.wID;
+            break;
+        }
     }
 
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -1180,6 +1397,10 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
 
     if (idCmd == kCmdRemoveFromFence) {
         removeChosen = true;
+        return true;
+    }
+    if (renameCmdId && idCmd == renameCmdId) {
+        renameChosen = true;
         return true;
     }
     if (idCmd >= 1 && idCmd <= 0x7FFF) {
@@ -1206,6 +1427,21 @@ void FenceWindow::RegisterClass(HINSTANCE hInst) {
 
 LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto* self = (FenceWindow*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+    // While the 新建 menu session is live, forward the menu messages the
+    // shell handler needs (Explorer forwards these to its handlers too):
+    // WM_INITMENUPOPUP fills the lazy submenu, DRAW/MEASURE let the classic
+    // TrackPopupMenu fallback render the handler's owner-drawn icons.
+    if (s_activeNewCM && (msg == WM_INITMENUPOPUP || msg == WM_DRAWITEM ||
+                          msg == WM_MEASUREITEM)) {
+        CComPtr<IContextMenu3> cm3;
+        CComPtr<IContextMenu2> cm2;
+        s_activeNewCM->QueryInterface(IID_PPV_ARGS(&cm3));
+        s_activeNewCM->QueryInterface(IID_PPV_ARGS(&cm2));
+        LRESULT lr = 0;
+        if (cm3)      cm3->HandleMenuMsg2(msg, wp, lp, &lr);
+        else if (cm2) cm2->HandleMenuMsg(msg, wp, lp);
+    }
 
     switch (msg) {
     case WM_CREATE: {
@@ -1356,6 +1592,11 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             }
         }
+
+        // A click anywhere outside the renaming icon's label commits the
+        // rename first (Explorer behavior), then the click acts normally.
+        if (self->m_renameIcon >= 0 && self->HitTestIcon(mx, my) != self->m_renameIcon)
+            self->ExitIconRename(true);
 
         if (!self->m_renaming && my < (int)self->m_render->Appearance().titleH) {
             // Top-right corner of the title bar = collapse/expand arrow.
@@ -1738,11 +1979,16 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         // Icon → show the real Explorer context menu (Open / Cut / Copy /
         // Delete / Properties …) with our fence-only verb appended.
         if (self && iconHit >= 0) {
-            bool invoked = false, removeChosen = false;
+            bool invoked = false, removeChosen = false, renameChosen = false;
             if (RunShellContextMenu(hwnd, self->m_icons[iconHit].path,
                                     self->m_icons[iconHit].name, pt,
-                                    invoked, removeChosen)) {
-                if (removeChosen) {
+                                    invoked, removeChosen, renameChosen)) {
+                if (renameChosen) {
+                    // Rename right here in the fence instead of letting the
+                    // shell rename the desktop/Explorer copy.
+                    self->SelectOnly(iconHit);
+                    self->EnterIconRename(iconHit);
+                } else if (removeChosen) {
                     eraseIcon(iconHit);
                 } else if (invoked) {
                     // If the shell command got rid of the file (e.g. Delete),
@@ -1768,6 +2014,51 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         AppendMenuW(menu, MF_STRING, 1, Loc(L"Rename", L"重命名"));
         AppendMenuW(menu, MF_STRING, 4, Loc(L"Appearance Settings...", L"外观设置..."));
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+        // Explorer's own 新建 submenu, queried straight into the fence menu.
+        // Mapped fences create into their folder; unmapped ones point the
+        // handler at the desktop PIDL itself so the entries match the system
+        // desktop menu exactly (e.g. 快捷方式).
+        PIDLIST_ABSOLUTE pidlNewFolder = nullptr;
+        if (self && self->IsMapped())
+            SHParseDisplayName(self->m_sourceFolder.c_str(), nullptr,
+                               &pidlNewFolder, 0, nullptr);
+        else
+            SHGetSpecialFolderLocation(nullptr, CSIDL_DESKTOP, &pidlNewFolder);
+        CComPtr<IContextMenu> spNewCM;
+        UINT newMenuPos = 0;
+        bool newMenuAdded = false;
+        if (pidlNewFolder &&
+            SUCCEEDED(CreateNewMenuHandler(pidlNewFolder, &spNewCM))) {
+            newMenuPos = (UINT)GetMenuItemCount(menu);
+            HRESULT hrQ = spNewCM->QueryContextMenu(menu, newMenuPos,
+                    (UINT)kCmdNewFirst, 0x7FFF, CMF_NORMAL);
+            NewDbg(L"QueryContextMenu=0x%08X newMenuPos=%u", (unsigned)hrQ, newMenuPos);
+            if (SUCCEEDED(hrQ)) {
+                // The handler fills its submenu lazily on WM_INITMENUPOPUP —
+                // the same message Explorer forwards before showing it.
+                HMENU hNewSub = GetSubMenu(menu, newMenuPos);
+                if (hNewSub) {
+                    CComPtr<IContextMenu3> cm3;
+                    CComPtr<IContextMenu2> cm2;
+                    spNewCM->QueryInterface(IID_PPV_ARGS(&cm3));
+                    spNewCM->QueryInterface(IID_PPV_ARGS(&cm2));
+                    LRESULT lr = 0;
+                    if (cm3)      cm3->HandleMenuMsg2(WM_INITMENUPOPUP, (WPARAM)hNewSub, 0, &lr);
+                    else if (cm2) cm2->HandleMenuMsg(WM_INITMENUPOPUP, (WPARAM)hNewSub, 0);
+                }
+                NewDbg(L"--- menu tree after New handler (unmapped=%d) ---",
+                       self && self->IsMapped() ? 0 : 1);
+                NewDbgDumpMenu(menu, 0);
+                NewDbg(L"--- end menu tree ---");
+                newMenuAdded = true;
+                s_activeNewCM = spNewCM;
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            } else {
+                spNewCM.Release();
+            }
+        }
+
         AppendMenuW(menu, MF_STRING, 2, Loc(L"Delete Fence", L"删除围栏"));
 
         // Sort-by submenu (mapped fences only)
@@ -1813,6 +2104,17 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (iconHit >= 0) icon(3, MenuGlyph::Remove);
             icon(1, MenuGlyph::Pencil);    // Rename
             icon(4, MenuGlyph::Sliders);   // Appearance Settings
+            // The New popup is addressed by position: the shell inserts it
+            // without a command id of its own.
+            if (newMenuAdded) {
+                HBITMAP b = glyphs.add(MenuGlyph::Plus, gsz);
+                if (b) {
+                    MENUITEMINFOW mii = { sizeof(mii) };
+                    mii.fMask = MIIM_BITMAP;
+                    mii.hbmpItem = b;
+                    SetMenuItemInfoW(menu, newMenuPos, TRUE, &mii);
+                }
+            }
             icon(2, MenuGlyph::Trash);     // Delete Fence
             icon(5, MenuGlyph::Folder);    // Map Folder
             if (self && !self->m_sourceFolder.empty())
@@ -1829,7 +2131,6 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (cmd < 0)
             cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
                 pt.x, pt.y, 0, hwnd, nullptr);
-        DestroyMenu(menu);
 
         if (self) {
             switch (cmd) {
@@ -1884,8 +2185,64 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             case 14: self->SetSort(self->m_sortColumn, true); break;
             case 15: self->SetSort(self->m_sortColumn, false); break;
+            default:
+                // An entry from the shell 新建 submenu: hand it back to the
+                // handler, which creates the file in the target folder.
+                if (cmd > kCmdNewFirst && cmd <= 0x7FFF && spNewCM && self) {
+                    std::wstring targetDir = self->m_sourceFolder;
+                    if (targetDir.empty()) {
+                        wchar_t buf[MAX_PATH] = {};
+                        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY,
+                                                       nullptr, 0, buf)))
+                            targetDir = buf;
+                    }
+                    std::vector<std::wstring> before, after;
+                    SnapshotFolderNames(targetDir, before);
+                    CMINVOKECOMMANDINFO ici = {};
+                    ici.cbSize = sizeof(ici);
+                    ici.hwnd = hwnd;
+                    ici.lpVerb = MAKEINTRESOURCEA(cmd - kCmdNewFirst);
+                    ici.nShow = SW_SHOWNORMAL;
+                    HRESULT hrInv = spNewCM->InvokeCommand(&ici);
+                    NewDbg(L"InvokeCommand=0x%08X cmd=%d", (unsigned)hrInv, cmd);
+                    SnapshotFolderNames(targetDir, after);
+                    std::wstring newPath;
+                    for (const auto& n : after) {
+                        if (std::find(before.begin(), before.end(), n) == before.end()) {
+                            newPath = targetDir + L"\\" + n;
+                            break;
+                        }
+                    }
+                    NewDbg(L"newPath=\"%s\"", newPath.c_str());
+                    if (!newPath.empty()) {
+                        if (self->IsMapped()) {
+                            // The watcher re-enumerates on its own; refresh
+                            // synchronously so the new file is visible and
+                            // can enter rename mode right away.
+                            self->ClearSearch();
+                            self->RefreshFromSource();
+                        } else {
+                            self->AddIcon(newPath.substr(newPath.find_last_of(L'\\') + 1),
+                                          newPath, (float)cli.x, (float)cli.y);
+                        }
+                        for (int i = 0; i < (int)self->m_icons.size(); i++) {
+                            if (lstrcmpiW(self->m_icons[i].path.c_str(), newPath.c_str()) == 0) {
+                                self->SelectOnly(i);
+                                self->EnterIconRename(i);
+                                break;
+                            }
+                        }
+                    }
+                }
+                break;
             }
         }
+        // Destroy only after dispatch: the shell 新建 handler keeps its
+        // cached submenu alive until InvokeCommand runs — destroying the
+        // menu first makes it fail with E_FAIL.
+        DestroyMenu(menu);
+        s_activeNewCM = nullptr;
+        if (pidlNewFolder) CoTaskMemFree(pidlNewFolder);
         return 0;
     }
 
@@ -1903,6 +2260,16 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CHAR:
         if (self && self->m_renaming && wp >= 32) {
             self->m_renameBuf += (wchar_t)wp;
+            self->Redraw();
+        } else if (self && self->m_renameIcon >= 0 && wp >= 32) {
+            NewDbg(L"CHAR wp=%d", (int)wp);
+            if (self->m_iconRenamePristine) {
+                self->m_iconRenameBuf.clear();
+                self->m_iconRenameCaret = 0;
+                self->m_iconRenamePristine = false;
+            }
+            self->m_iconRenameBuf.insert(self->m_iconRenameCaret, 1, (wchar_t)wp);
+            self->m_iconRenameCaret++;
             self->Redraw();
         } else if (self && self->m_searchFocused) {
             if (wp == 0x08) {   // backspace
@@ -1929,6 +2296,42 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 self->m_renameBuf.pop_back();
                 self->Redraw();
             }
+        } else if (self && self->m_renameIcon >= 0) {
+            NewDbg(L"KEYDOWN wp=%d", (int)wp);
+            auto& buf = self->m_iconRenameBuf;
+            auto& caret = self->m_iconRenameCaret;
+            // Explorer's rename-box editing: the initial select-all consumes
+            // the first typed/backspaced input; Left/Right/Home/End only
+            // collapse it to an edge of the selection.
+            if (wp == VK_RETURN) {
+                self->ExitIconRename(true);
+            } else if (wp == VK_ESCAPE) {
+                self->ExitIconRename(false);
+            } else if (wp == VK_BACK) {
+                if (self->m_iconRenamePristine) {
+                    buf.clear(); caret = 0; self->m_iconRenamePristine = false;
+                } else if (caret > 0) { buf.erase(caret - 1, 1); caret--; }
+                self->Redraw();
+            } else if (wp == VK_DELETE) {
+                if (self->m_iconRenamePristine) {
+                    buf.clear(); caret = 0; self->m_iconRenamePristine = false;
+                } else if (caret < buf.size()) buf.erase(caret, 1);
+                self->Redraw();
+            } else if (wp == VK_LEFT) {
+                if (self->m_iconRenamePristine) { self->m_iconRenamePristine = false; caret = 0; }
+                else if (caret > 0) caret--;
+                self->Redraw();
+            } else if (wp == VK_RIGHT) {
+                if (self->m_iconRenamePristine) { self->m_iconRenamePristine = false; caret = buf.size(); }
+                else if (caret < buf.size()) caret++;
+                self->Redraw();
+            } else if (wp == VK_HOME) {
+                self->m_iconRenamePristine = false; caret = 0;
+                self->Redraw();
+            } else if (wp == VK_END) {
+                self->m_iconRenamePristine = false; caret = buf.size();
+                self->Redraw();
+            }
         } else if (self && self->m_searchFocused) {
             if (wp == VK_ESCAPE) { self->ClearSearch(); }
         } else if (self && self->IsMapped() && wp == 'F' &&
@@ -1939,8 +2342,12 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_KILLFOCUS:
         if (self) {
+            NewDbg(L"KILLFOCUS renaming=%d renameIcon=%d search=%d",
+                   self->m_renaming, self->m_renameIcon, self->m_searchFocused);
             if (self->m_renaming)
                 self->ExitRename(false);
+            else if (self->m_renameIcon >= 0)
+                self->ExitIconRename(true);   // Explorer commits on focus loss
             else if (self->m_searchFocused) {
                 self->m_searchFocused = false;
                 self->m_cursorVisible = false;
@@ -1956,7 +2363,8 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_TIMER:
         if (!self) return 0;
-        if (wp == 1 && (self->m_renaming || self->m_searchFocused)) {
+        if (wp == 1 && (self->m_renaming || self->m_renameIcon >= 0 ||
+                        self->m_searchFocused)) {
             self->m_cursorVisible = !self->m_cursorVisible;
             self->Redraw();
         } else if (wp == 2) {

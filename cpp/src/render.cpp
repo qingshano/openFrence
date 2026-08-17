@@ -881,6 +881,8 @@ bool RenderContext::DrawFence(const std::wstring& title,
                 std::find(selectedPaths->begin(), selectedPaths->end(),
                           icons[i].path) != selectedPaths->end();
             const bool dragged  = dragActive && selected;
+            const bool renamingThis = view && view->renameIcon == i &&
+                                      view->iconRenameText != nullptr;
 
             const float cellW = listMode ? (w - 2 * pad) : m_app.cellW;
             const float cellH = listMode ? listRowH : m_app.cellH;
@@ -900,7 +902,7 @@ bool RenderContext::DrawFence(const std::wstring& title,
                 if (clipH < cellH * 0.5f) continue;   // less than half visible → skip
 
                 // Hover / selection plate (clipped to body)
-                if ((hovered || selected) && !dragged) {
+                if ((hovered || selected) && !dragged && !renamingThis) {
                     float fillA, edgeA, cr, cg, cb;
                     if (selected) {
                         cr = m_app.accent[0]; cg = m_app.accent[1]; cb = m_app.accent[2];
@@ -941,7 +943,39 @@ bool RenderContext::DrawFence(const std::wstring& title,
                 D2D1_RECT_F textRect{tx, clipTop, cx + cellW - 4.0f, clipTop + clipH};
                 auto* listFmt = m_listFormat.p ? m_listFormat.p : m_iconFormat.p;
                 auto* textBrush = selected ? m_textBrush.p : m_iconTextBrush.p;
-                if (dragged) {
+                if (renamingThis) {
+                    D2D1_ROUNDED_RECT box{{tx - 2.0f, clipTop + 1.0f,
+                                           cx + cellW - 2.0f, clipTop + clipH - 1.0f},
+                                          cellR * 0.5f, cellR * 0.5f};
+                    CComPtr<ID2D1SolidColorBrush> bgB, bdB;
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(0.11f, 0.12f, 0.15f, 0.96f), &bgB);
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(
+                        m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.9f), &bdB);
+                    if (bgB) ctx.FillRoundedRectangle(box, bgB.p);
+                    if (bdB) ctx.DrawRoundedRectangle(box, bdB.p, 1.0f);
+                    ctx.DrawText(view->iconRenameText->c_str(),
+                        (UINT32)view->iconRenameText->size(),
+                        listFmt, textRect, m_textBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                    if (view->renameCaret >= 0) {
+                        std::wstring prefix = view->iconRenameText->substr(
+                            0, (size_t)view->renameCaret);
+                        CComPtr<IDWriteTextLayout> pl;
+                        float pw = 0.0f;
+                        if (SUCCEEDED(m_dwFactory->CreateTextLayout(
+                                prefix.c_str(), (UINT32)prefix.size(), listFmt,
+                                cellW - listIconSz - 8.0f, cellH, &pl)) && pl) {
+                            DWRITE_TEXT_METRICS tm = {};
+                            pl->GetMetrics(&tm);
+                            pw = tm.width;
+                        }
+                        CComPtr<ID2D1SolidColorBrush> cb;
+                        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.85f), &cb);
+                        if (cb) ctx.FillRectangle(D2D1_RECT_F{
+                            tx + pw, clipTop + 2.0f, tx + pw + 1.5f,
+                            clipTop + clipH - 2.0f}, cb.p);
+                    }
+                } else if (dragged) {
                     CComPtr<ID2D1SolidColorBrush> faded;
                     ctx.CreateSolidColorBrush(D2D1::ColorF(
                         m_app.iconText[0], m_app.iconText[1], m_app.iconText[2],
@@ -957,7 +991,7 @@ bool RenderContext::DrawFence(const std::wstring& title,
             } else {
                 // ── Grid mode ──
                 // Hover / selection plate
-                if ((hovered || selected) && !dragged) {
+                if ((hovered || selected) && !dragged && !renamingThis) {
                     float fillA, edgeA, cr, cg, cb;
                     if (selected) {
                         cr = m_app.accent[0]; cg = m_app.accent[1]; cb = m_app.accent[2];
@@ -991,7 +1025,55 @@ bool RenderContext::DrawFence(const std::wstring& title,
                 }
 
                 D2D1_RECT_F textRect{cx, cy + iconSz + 4.0f, cx + cellW, cy + cellH};
-                if (dragged) {
+                if (renamingThis) {
+                    // Explorer-style rename edit box: opaque backing + accent
+                    // ring, sized to the live text.
+                    float textW = 0.0f, textH = cellH - (iconSz + 4.0f);
+                    CComPtr<IDWriteTextLayout> layout;
+                    if (SUCCEEDED(m_dwFactory->CreateTextLayout(
+                            view->iconRenameText->c_str(),
+                            (UINT32)view->iconRenameText->size(),
+                            m_iconFormat.p, cellW, cellH, &layout)) && layout) {
+                        DWRITE_TEXT_METRICS tm = {};
+                        layout->GetMetrics(&tm);
+                        textW = tm.width; textH = tm.height;
+                    }
+                    float bx = cx + (cellW - textW) * 0.5f;
+                    D2D1_ROUNDED_RECT box{{bx - 3.0f, textRect.top - 1.0f,
+                                           bx + textW + 3.0f, textRect.top + textH + 1.5f},
+                                          cellR * 0.5f, cellR * 0.5f};
+                    CComPtr<ID2D1SolidColorBrush> bgB, bdB;
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(0.11f, 0.12f, 0.15f, 0.96f), &bgB);
+                    ctx.CreateSolidColorBrush(D2D1::ColorF(
+                        m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.9f), &bdB);
+                    if (bgB) ctx.FillRoundedRectangle(box, bgB.p);
+                    if (bdB) ctx.DrawRoundedRectangle(box, bdB.p, 1.0f);
+                    ctx.DrawText(view->iconRenameText->c_str(),
+                        (UINT32)view->iconRenameText->size(),
+                        m_iconFormat.p, textRect, m_textBrush.p,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+                    if (view->renameCaret >= 0) {
+                        // The label format centers the text in the full cell
+                        // width; the caret lands right after the typed prefix.
+                        std::wstring prefix = view->iconRenameText->substr(
+                            0, (size_t)view->renameCaret);
+                        CComPtr<IDWriteTextLayout> pl;
+                        float pw = 0.0f;
+                        if (SUCCEEDED(m_dwFactory->CreateTextLayout(
+                                prefix.c_str(), (UINT32)prefix.size(),
+                                m_iconFormat.p, cellW, cellH, &pl)) && pl) {
+                            DWRITE_TEXT_METRICS tm = {};
+                            pl->GetMetrics(&tm);
+                            pw = tm.width;
+                        }
+                        float caretX = cx + (cellW - textW) * 0.5f + pw;
+                        CComPtr<ID2D1SolidColorBrush> cb;
+                        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.85f), &cb);
+                        if (cb) ctx.FillRectangle(D2D1_RECT_F{
+                            caretX, textRect.top + 1.0f, caretX + 1.5f,
+                            textRect.top + textH + 1.0f}, cb.p);
+                    }
+                } else if (dragged) {
                     CComPtr<ID2D1SolidColorBrush> faded;
                     ctx.CreateSolidColorBrush(D2D1::ColorF(
                         m_app.iconText[0], m_app.iconText[1], m_app.iconText[2],
@@ -1164,6 +1246,15 @@ bool RenderContext::Present(HWND hwnd, int x, int y) {
     HDC screenDC = GetDC(nullptr);
     BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     POINT ptDst = { x, y }, ptSrc = { 0, 0 };
+    // UpdateLayeredWindow positions a WS_CHILD in its parent's client
+    // coordinates (it routes through SetWindowPos); callers pass screen
+    // coordinates, so translate when the window is a child. On a display
+    // whose virtual origin is (0,0) the two spaces coincide — that is the
+    // only reason this ever worked single-monitor.
+    if (GetWindowLongW(hwnd, GWL_STYLE) & WS_CHILD) {
+        HWND parent = GetParent(hwnd);
+        if (parent) ScreenToClient(parent, &ptDst);
+    }
     SIZE size = { (int)m_width, (int)m_height };
     UpdateLayeredWindow(hwnd, screenDC, &ptDst, &size, m_memDC, &ptSrc, 0, &blend, ULW_ALPHA);
     ReleaseDC(nullptr, screenDC);

@@ -50,6 +50,14 @@ public:
     /// fences are children of explorer's icon list, so they never see them.
     /// Safe to call repeatedly — SetTimer restarts the countdown.
     void ScheduleBackdropRefresh();
+    /// Put the fence back at its saved screen position when something moved
+    /// it without a user gesture — the desktop icon list shifts when the
+    /// virtual screen origin moves (monitor plugged in left/above), and a
+    /// child keeps parent-relative coordinates, so it would drift with the
+    /// parent. An anchor that fell off-screen (its monitor unplugged) is
+    /// clamped into the nearest monitor's work area. Called from the owner
+    /// window's 300ms tick; no-op while a move/resize/drag is live.
+    void RestoreAnchor();
     void SetDragOver(bool over);
     FenceData GetData() const;
     RenderContext& GetRender() { return *m_render; }
@@ -57,6 +65,11 @@ public:
 
     void EnterRename();
     void ExitRename(bool commit);
+    /// In-place icon rename (Explorer style): an edit box replaces the icon
+    /// label; commit renames the file on disk. Used after 新建 so the fresh
+    /// file lands directly in edit mode.
+    void EnterIconRename(int idx);
+    void ExitIconRename(bool commit);
 
     void ToggleCollapse();
     bool IsCollapsed() const { return m_collapsed; }
@@ -200,6 +213,12 @@ private:
 
     bool m_renaming = false;
     std::wstring m_renameBuf;
+    int  m_renameIcon = -1;           // icon being renamed (-1 = none)
+    std::wstring m_iconRenameBuf;     // base name (extension kept separately)
+    std::wstring m_iconRenameExt;
+    size_t m_iconRenameCaret = 0;     // insertion point inside m_iconRenameBuf
+    bool m_iconRenamePristine = false; // buffer not edited yet → first input
+                                       // replaces it (Explorer select-all)
     bool m_cursorVisible = false;
     UINT_PTR m_cursorTimer = 0;
 
