@@ -11,6 +11,10 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Remove stale in-repository build cache
+        shell: pwsh
+        run: if (Test-Path cpp/build) { Remove-Item -Recurse -Force cpp/build }
+
       - name: Configure
         run: cmake -S cpp -B cpp/build -A x64
 
