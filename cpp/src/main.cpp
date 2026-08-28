@@ -135,6 +135,12 @@ void AddTrayIcon(HWND hwnd) {
                    (LPVOID)(DWORD_PTR)GetCurrentProcessId(), nullptr);
 }
 
+static void RemoveTrayIcon(HWND hwnd) {
+    NOTIFYICONDATAW nid = { sizeof(nid) };
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+}
 bool g_allHidden = false;        // extern'd by config.cpp (persisted)
 static bool g_deskHidden = false;
 // Set by WatchDesktopIconVisibility when EXPLORER hid the icon list (desktop
@@ -311,7 +317,7 @@ void ShowTrayMenu(HWND hwnd) {
         CreateDesktopShortcut();
     } else if (cmd == 102) {
         Config::SaveNow();   // do not ride on the debounce for a real exit
-        Shell_NotifyIconW(NIM_DELETE, &NOTIFYICONDATAW{sizeof(NOTIFYICONDATAW), hwnd, 1});
+        RemoveTrayIcon(hwnd);
         PostQuitMessage(0);
     }
 }
@@ -406,7 +412,7 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_DESTROY:
         Config::SaveNow();   // safety net; the tray Exit path saves too
-        Shell_NotifyIconW(NIM_DELETE, &NOTIFYICONDATAW{sizeof(NOTIFYICONDATAW), hwnd, 1});
+        RemoveTrayIcon(hwnd);
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
