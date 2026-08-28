@@ -1,0 +1,25 @@
+name: Build Windows executable
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S cpp -B cpp/build -A x64
+
+      - name: Build
+        run: cmake --build cpp/build --config Release --target openfences
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: openfences-self-built
+          path: cpp/build/Release/openfences.exe
+          if-no-files-found: error
