@@ -1179,12 +1179,37 @@ bool RenderContext::DrawFence(const std::wstring& title,
 
     // ── Drag-over accent ──
     if (dragOver) {
-        CComPtr<ID2D1SolidColorBrush> hl2;
+        CComPtr<ID2D1SolidColorBrush> wash, glow, edge, inner;
         ctx.CreateSolidColorBrush(D2D1::ColorF(
-            m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.55f), &hl2);
-        if (hl2) {
-            D2D1_ROUNDED_RECT hlRR{{1.5f, 1.5f, w - 1.5f, h - 1.5f}, r - 1, r - 1};
-            ctx.DrawRoundedRectangle(hlRR, hl2.p, 2.0f);
+            m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.12f), &wash);
+        ctx.CreateSolidColorBrush(D2D1::ColorF(
+            m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.28f), &glow);
+        ctx.CreateSolidColorBrush(D2D1::ColorF(
+            m_app.accent[0], m_app.accent[1], m_app.accent[2], 0.98f), &edge);
+        ctx.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.72f), &inner);
+
+        // A light full-surface tint makes the destination unmistakable even
+        // on a busy wallpaper. The broad translucent stroke reads as a glow,
+        // while the crisp accent + white inner rings remain visible against
+        // both very dark and very bright fence themes.
+        if (wash) ctx.FillRoundedRectangle(rr, wash.p);
+        if (glow) {
+            D2D1_ROUNDED_RECT glowRR{{4.0f, 4.0f, w - 4.0f, h - 4.0f},
+                                     (std::max)(0.0f, r - 3.0f),
+                                     (std::max)(0.0f, r - 3.0f)};
+            ctx.DrawRoundedRectangle(glowRR, glow.p, 8.0f);
+        }
+        if (edge) {
+            D2D1_ROUNDED_RECT edgeRR{{2.25f, 2.25f, w - 2.25f, h - 2.25f},
+                                     (std::max)(0.0f, r - 1.5f),
+                                     (std::max)(0.0f, r - 1.5f)};
+            ctx.DrawRoundedRectangle(edgeRR, edge.p, 4.5f);
+        }
+        if (inner) {
+            D2D1_ROUNDED_RECT innerRR{{5.5f, 5.5f, w - 5.5f, h - 5.5f},
+                                      (std::max)(0.0f, r - 4.5f),
+                                      (std::max)(0.0f, r - 4.5f)};
+            ctx.DrawRoundedRectangle(innerRR, inner.p, 1.25f);
         }
     }
 
