@@ -139,6 +139,9 @@ private:
     void PushGroupOut();             // clear bystanders from every cell the
                                      // dragged group currently covers
     void SettleDragGroup();          // snap every member + end the drag
+    void UpdateCrossFenceTarget(POINT screenPt);
+    bool TransferDragGroupToTarget();
+    void ClearCrossFenceTarget();
     static HWND s_owner;
     static int s_lang;
 
@@ -170,6 +173,7 @@ private:
     std::vector<int> m_dragExcludes;             // group indexes, for occupancy
     bool  m_dragMoved = false;    // cursor passed the system drag threshold
     int   m_dragGrabX = 0, m_dragGrabY = 0;   // LBUTTONDOWN point (client)
+    FenceWindow* m_crossTarget = nullptr;      // other fence under the live cursor
 
     // Explorer-style icon states. Hover is an index; the selection is a set
     // of paths (keyed, not indexed, so it survives the bring-to-front

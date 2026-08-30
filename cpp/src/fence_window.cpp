@@ -266,6 +266,7 @@ FenceWindow::~FenceWindow() {
     // If the settings panel is open for this fence, tear it down first so it
     // never keeps referencing a fence that is going away.
     SettingsPanel::CloseActiveFor(this);
+    ClearCrossFenceTarget();
     StopSourceWatch();
     // When explorer restarts, the desktop tree takes our child window down
     // with it — by the time we run, the HWND is already dead.
@@ -675,6 +676,7 @@ void FenceWindow::SettleDragGroup() {
         }
     }
     if (m_dragMoved) Config::MarkDirty();   // icons changed cells
+    ClearCrossFenceTarget();
     m_dragIcon = -1;
     m_dragHoverCell = -1;
     m_dragDirX = 0;
@@ -682,6 +684,97 @@ void FenceWindow::SettleDragGroup() {
     m_dragGroup.clear();
     m_dragExcludes.clear();
     Redraw();
+}
+
+void FenceWindow::ClearCrossFenceTarget() {
+    if (!m_crossTarget) return;
+    FenceWindow* old = m_crossTarget;
+    m_crossTarget = nullptr;
+    old->SetDragOver(false);
+}
+
+void FenceWindow::UpdateCrossFenceTarget(POINT screenPt) {
+    if (IsMapped()) {
+        ClearCrossFenceTarget();
+        return;
+    }
+    FenceWindow* next = nullptr;
+    HWND hit = WindowFromPoint(screenPt);
+    while (hit) {
+        wchar_t className[64] = {};
+        GetClassNameW(hit, className, (int)(sizeof(className) / sizeof(className[0])));
+        if (lstrcmpW(className, ClassName()) == 0) {
+            auto* candidate = (FenceWindow*)GetWindowLongPtrW(hit, GWLP_USERDATA);
+            // A mapped fence mirrors a real directory. Moving a virtual
+            // membership entry into it would either vanish on reload or
+            // imply a destructive filesystem move, so only ordinary,
+            // expanded fences accept this in-app transfer.
+            if (candidate && candidate != this && !candidate->m_collapsed &&
+                !candidate->IsMapped() && !candidate->m_appHidden)
+                next = candidate;
+            break;
+        }
+        hit = GetParent(hit);
+    }
+    if (next == m_crossTarget) return;
+    ClearCrossFenceTarget();
+    m_crossTarget = next;
+    if (m_crossTarget) m_crossTarget->SetDragOver(true);
+}
+
+bool FenceWindow::TransferDragGroupToTarget() {
+    if (!m_crossTarget || !m_dragMoved || m_dragGroup.empty()) return false;
+
+    FenceWindow* target = m_crossTarget;
+    POINT dropPt = {};
+    GetCursorPos(&dropPt);
+    ScreenToClient(target->m_hwnd, &dropPt);
+
+    const DragStart* leader = nullptr;
+    for (const auto& d : m_dragGroup)
+        if (d.idx == m_dragIcon) { leader = &d; break; }
+    if (!leader) return false;
+
+    std::vector<IconEntry> moved;
+    std::vector<std::pair<float, float>> offsets;
+    moved.reserve(m_dragGroup.size());
+    offsets.reserve(m_dragGroup.size());
+    for (const auto& d : m_dragGroup) {
+        if (d.idx < 0 || d.idx >= (int)m_icons.size()) continue;
+        moved.push_back(m_icons[d.idx]);
+        offsets.push_back({ d.x - leader->x, d.y - leader->y });
+    }
+    if (moved.empty()) return false;
+
+    // Add first, then remove from the source. AddIcon also handles a path
+    // that already exists in the destination by moving that existing icon
+    // instead of creating a duplicate.
+    for (size_t i = 0; i < moved.size(); i++) {
+        target->AddIcon(moved[i].name, moved[i].path,
+                        (float)dropPt.x + offsets[i].first,
+                        (float)dropPt.y + offsets[i].second);
+    }
+    target->m_selectedPaths.clear();
+    for (const auto& icon : moved)
+        if (!ContainsPath(target->m_selectedPaths, icon.path))
+            target->m_selectedPaths.push_back(icon.path);
+
+    m_icons.erase(std::remove_if(m_icons.begin(), m_icons.end(),
+        [&](const IconEntry& icon) { return ContainsPath(m_selectedPaths, icon.path); }),
+        m_icons.end());
+    ClearSelection();
+    m_hoverIcon = -1;
+    ClearCrossFenceTarget();
+    m_dragIcon = -1;
+    m_dragHoverCell = -1;
+    m_dragDirX = 0;
+    m_dragMoved = false;
+    m_dragGroup.clear();
+    m_dragExcludes.clear();
+    Redraw();
+    target->Redraw();
+    Config::MarkDirty();
+    return true;
 }
 
 // ── Marquee (rubber-band) multi-select ──
@@ -1806,6 +1899,17 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 // start — squatters are pushed to the nearest free cells.
                 self->PushGroupOut();
             }
+            POINT screenPt = {};
+            GetCursorPos(&screenPt);
+            self->UpdateCrossFenceTarget(screenPt);
+            // The target fence owns the drop preview. Keep the source icons
+            // at their last in-fence position while the captured cursor is
+            // over another fence; drawing outside this layered child window
+            // would be clipped by the desktop host anyway.
+            if (self->m_crossTarget) {
+                self->Redraw();
+                return 0;
+            }
             // The whole selection rides ONE shared delta (Explorer group
             // drag). For a single-icon selection this is exactly the old
             // offset-follow behavior.
@@ -1866,12 +1970,17 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             self->Redraw();   // erase the rubber band
         }
         if (self->m_dragIcon >= 0) {
-            // Mouse capture routed every move to the drag path, so the hover
-            // plate is stale — re-derive it from the live cursor before the
-            // settle redraw paints the final frame.
-            POINT p; GetCursorPos(&p); ScreenToClient(hwnd, &p);
-            self->m_hoverIcon = self->HitTestIcon(p.x, p.y);
-            self->SettleDragGroup();
+            POINT screenPt = {};
+            GetCursorPos(&screenPt);
+            self->UpdateCrossFenceTarget(screenPt);
+            if (!self->TransferDragGroupToTarget()) {
+                // Mouse capture routed every move to the drag path, so the
+                // hover plate is stale — re-derive it from the live cursor
+                // before the settle redraw paints the final frame.
+                POINT p = screenPt; ScreenToClient(hwnd, &p);
+                self->m_hoverIcon = self->HitTestIcon(p.x, p.y);
+                self->SettleDragGroup();
+            }
         }
         bool geomChanged = self->m_moving || self->m_resizeMask;
         self->m_moving = false;
@@ -1891,6 +2000,7 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 self->Redraw();
             }
             if (self->m_dragIcon >= 0) self->SettleDragGroup();
+            else self->ClearCrossFenceTarget();
             if (self->m_marquee) {
                 self->m_marquee = false;
                 self->m_marqueeMoved = false;
