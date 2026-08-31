@@ -410,10 +410,6 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             Config::SaveNow();
             return 0;
         }
-        if (wp == 4) {   // keep selectively hidden desktop originals parked
-            DesktopIconVisibility::Apply();
-            return 0;
-        }
         ScanAndConstrainIcons();
         return 0;
     case WM_FENCE_DELETE: {
@@ -499,7 +495,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // and every fence re-adopts it. Each fence early-outs unless the size
     // actually changed.
     SetTimer(g_owner, 2, 300, nullptr);
-    SetTimer(g_owner, 4, 3000, nullptr);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {
