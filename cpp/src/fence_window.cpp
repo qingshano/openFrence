@@ -3,6 +3,7 @@
 #include "context_menu.h"
 #include "menu_icons.h"
 #include "config.h"
+#include "desktop_icon_visibility.h"
 #include "explorer_sort.h"
 #include <windowsx.h>
 #include <shellapi.h>
@@ -684,6 +685,52 @@ void FenceWindow::SettleDragGroup() {
     m_dragGroup.clear();
     m_dragExcludes.clear();
     Redraw();
+}
+
+void FenceWindow::FitToContent() {
+    if (!m_hwnd || !m_render) return;
+    if (m_collapsed) ToggleCollapse();
+
+    const auto& app = m_render->Appearance();
+    int count = (std::max)(1, VisibleCount());
+    MONITORINFO mi = { sizeof(mi) };
+    GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    int workW = mi.rcWork.right - mi.rcWork.left;
+    int workH = mi.rcWork.bottom - mi.rcWork.top;
+    int maxW = (std::max)(160, workW - 32);
+    int maxH = (std::max)(120, workH - 32);
+    int minW = (int)(120.0f * DpiScale() + 0.5f);
+    int minH = (int)(ContentTop() + 40.0f * DpiScale() + 0.5f);
+    int targetW = (int)m_render->Width();
+    int targetH = (int)m_render->Height();
+
+    if (app.displayMode == 1) {
+        float rowH = app.iconSize * 2.6f;
+        targetH = (int)(ContentTop() + kGridPad + count * rowH + kGridPad + 0.5f);
+    } else {
+        float cellW = (std::max)(1.0f, app.cellW);
+        float cellH = (std::max)(1.0f, app.cellH);
+        int maxCols = (std::max)(1, (int)((maxW - 2 * kGridPad) / cellW));
+        int cols = (int)ceilf(sqrtf((float)count));
+        cols = (std::min)((std::max)(1, cols), maxCols);
+        int rows = (count + cols - 1) / cols;
+        while (cols < maxCols &&
+               ContentTop() + 2 * kGridPad + rows * cellH > maxH) {
+            ++cols;
+            rows = (count + cols - 1) / cols;
+        }
+        targetW = (int)(2 * kGridPad + cols * cellW + 0.5f);
+        targetH = (int)(ContentTop() + 2 * kGridPad + rows * cellH + 0.5f);
+    }
+
+    targetW = (std::min)((std::max)(targetW, minW), maxW);
+    targetH = (std::min)((std::max)(targetH, minH), maxH);
+    SetWindowPos(m_hwnd, nullptr, 0, 0, targetW, targetH,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    m_listScroll = 0;
+    RelayoutIcons();
+    RestoreAnchor();
+    Config::MarkDirty();
 }
 
 void FenceWindow::ClearCrossFenceTarget() {
@@ -1418,6 +1465,7 @@ static HRESULT CreateNewMenuHandler(PCIDLIST_ABSOLUTE pidlFolder, IContextMenu**
 
 // The fence-only verb is placed far above the shell's command-id range.
 static const int kCmdRemoveFromFence = 0x8001;
+static const int kCmdToggleDesktopOriginal = 0x8002;
 static const int kCmdSortByName  = 0x8010;
 static const int kCmdSortByDate  = 0x8011;
 static const int kCmdSortByType  = 0x8012;
@@ -1433,9 +1481,10 @@ static const int kCmdSortDesc    = 0x8015;
 // the fence's in-place rename instead of handing it to Explorer).
 static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
                                 const std::wstring& displayName, POINT ptScreen,
+                                bool showDesktopOriginal, int selectionCount,
                                 bool& invoked, bool& removeChosen,
-                                bool& renameChosen) {
-    invoked = removeChosen = renameChosen = false;
+                                bool& renameChosen, bool& visibilityChosen) {
+    invoked = removeChosen = renameChosen = visibilityChosen = false;
 
     CComPtr<IContextMenu> spCM;
     if (FAILED(CreateShellContextMenu(path, &spCM)) || !spCM) return false;
@@ -1475,6 +1524,17 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
     std::wstring rm = std::wstring(FenceWindow::Loc(L"Remove from fence", L"从围栏移除")) +
                       L"  \"" + displayName + L"\"";
     AppendMenuW(menu, MF_STRING, kCmdRemoveFromFence, rm.c_str());
+    std::wstring visibilityText;
+    if (showDesktopOriginal) {
+        visibilityText = selectionCount > 1
+            ? FenceWindow::Loc(L"Show selected desktop originals", L"显示所选桌面原图标")
+            : FenceWindow::Loc(L"Show desktop original", L"显示桌面原图标");
+    } else {
+        visibilityText = selectionCount > 1
+            ? FenceWindow::Loc(L"Hide selected desktop originals", L"隐藏所选桌面原图标")
+            : FenceWindow::Loc(L"Hide desktop original", L"隐藏桌面原图标");
+    }
+    AppendMenuW(menu, MF_STRING, kCmdToggleDesktopOriginal, visibilityText.c_str());
 
     // Win11 look first: we repaint the (identical) HMENU contents ourselves,
     // because Explorer's XAML menu cannot be obtained cross-process. If the
@@ -1490,6 +1550,10 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
 
     if (idCmd == kCmdRemoveFromFence) {
         removeChosen = true;
+        return true;
+    }
+    if (idCmd == kCmdToggleDesktopOriginal) {
+        visibilityChosen = true;
         return true;
     }
     if (renameCmdId && idCmd == renameCmdId) {
@@ -2086,14 +2150,36 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             Config::MarkDirty();
         };
 
+        std::vector<IconEntry> selectedIcons;
+        if (self && iconHit >= 0) {
+            for (const auto& icon : self->m_icons)
+                if (self->IsPathSelected(icon.path)) selectedIcons.push_back(icon);
+        }
+        bool showDesktopOriginal = !selectedIcons.empty() &&
+            std::all_of(selectedIcons.begin(), selectedIcons.end(), [](const IconEntry& icon) {
+                return DesktopIconVisibility::IsHidden(icon.path);
+            });
+        auto toggleDesktopOriginals = [&]() {
+            bool hide = !showDesktopOriginal;
+            for (const auto& icon : selectedIcons)
+                DesktopIconVisibility::SetHidden(icon.name, icon.path, hide);
+            DesktopIconVisibility::Apply();
+            Config::MarkDirty();
+        };
+
         // Icon → show the real Explorer context menu (Open / Cut / Copy /
         // Delete / Properties …) with our fence-only verb appended.
         if (self && iconHit >= 0) {
             bool invoked = false, removeChosen = false, renameChosen = false;
+            bool visibilityChosen = false;
             if (RunShellContextMenu(hwnd, self->m_icons[iconHit].path,
                                     self->m_icons[iconHit].name, pt,
-                                    invoked, removeChosen, renameChosen)) {
-                if (renameChosen) {
+                                    showDesktopOriginal, (int)selectedIcons.size(),
+                                    invoked, removeChosen, renameChosen,
+                                    visibilityChosen)) {
+                if (visibilityChosen) {
+                    toggleDesktopOriginals();
+                } else if (renameChosen) {
                     // Rename right here in the fence instead of letting the
                     // shell rename the desktop/Explorer copy.
                     self->SelectOnly(iconHit);
@@ -2118,10 +2204,15 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             std::wstring rm = std::wstring(Loc(L"Remove", L"移除")) + L" \"" +
                               self->m_icons[iconHit].name + L"\"";
             AppendMenuW(menu, MF_STRING, 3, rm.c_str());
+            AppendMenuW(menu, MF_STRING, 8,
+                showDesktopOriginal
+                    ? Loc(L"Show desktop original", L"显示桌面原图标")
+                    : Loc(L"Hide desktop original", L"隐藏桌面原图标"));
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         }
 
         AppendMenuW(menu, MF_STRING, 1, Loc(L"Rename", L"重命名"));
+        AppendMenuW(menu, MF_STRING, 7, Loc(L"Auto fit", L"一键自适应"));
         AppendMenuW(menu, MF_STRING, 4, Loc(L"Appearance Settings...", L"外观设置..."));
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -2212,7 +2303,9 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 SetMenuItemInfoW(menu, id, FALSE, &mii);
             };
             if (iconHit >= 0) icon(3, MenuGlyph::Remove);
+            if (iconHit >= 0) icon(8, showDesktopOriginal ? MenuGlyph::Eye : MenuGlyph::EyeOff);
             icon(1, MenuGlyph::Pencil);    // Rename
+            icon(7, MenuGlyph::Grid);      // Auto fit
             icon(4, MenuGlyph::Sliders);   // Appearance Settings
             // The New popup is addressed by position: the shell inserts it
             // without a command id of its own.
@@ -2245,6 +2338,8 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (self) {
             switch (cmd) {
             case 1: self->EnterRename(); break;
+            case 7: self->FitToContent(); break;
+            case 8: toggleDesktopOriginals(); break;
             case 2:
                 if (s_owner)
                     PostMessage(s_owner, WM_FENCE_DELETE, (WPARAM)hwnd, 0);

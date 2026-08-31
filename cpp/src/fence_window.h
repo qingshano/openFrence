@@ -82,6 +82,7 @@ public:
     void SaveGridLayout();
     void RestoreGridLayout();
     void FitToListHeight();     // resize window to show all icons in list mode
+    void FitToContent();        // one-click width/height fit for the current icons
 
     // Folder mapping: replace fence contents with the files inside a folder,
     // and watch it for live updates.

@@ -1,5 +1,6 @@
 #include "config.h"
 #include "fence_window.h"
+#include "desktop_icon_visibility.h"
 #include <nlohmann/json.hpp>
 #include <shlobj.h>     // SHGetFolderPathW (CSIDL_APPDATA)
 #include <shellapi.h>   // ShellExecuteW (reveal in Explorer)
@@ -159,6 +160,17 @@ bool SaveNow() {
     j["version"]  = 1;
     j["language"] = FenceWindow::GetLanguage();
     j["hideAll"]  = g_allHidden;
+    json hiddenDesktopIcons = json::array();
+    for (const auto& state : DesktopIconVisibility::States()) {
+        if (!state.hidden) continue;
+        hiddenDesktopIcons.push_back({
+            { "name", ToUtf8(state.name) },
+            { "path", ToUtf8(state.path) },
+            { "x", state.x }, { "y", state.y },
+            { "hasPosition", state.hasPosition },
+        });
+    }
+    j["hiddenDesktopIcons"] = std::move(hiddenDesktopIcons);
     json fences = json::array();
     for (const auto& f : g_fences)
         fences.push_back(SaveFence(*f));
@@ -216,6 +228,21 @@ bool LoadApp() {
 
     int lang = j.value("language", 1);
     FenceWindow::SetLanguage(lang == 0 ? 0 : 1);
+
+    std::vector<HiddenDesktopIconState> hiddenStates;
+    if (j.contains("hiddenDesktopIcons") && j["hiddenDesktopIcons"].is_array()) {
+        for (const auto& item : j["hiddenDesktopIcons"]) {
+            if (!item.is_object()) continue;
+            HiddenDesktopIconState state;
+            state.name = FromUtf8(item.value("name", std::string()));
+            state.path = FromUtf8(item.value("path", std::string()));
+            state.x = item.value("x", 0);
+            state.y = item.value("y", 0);
+            state.hasPosition = item.value("hasPosition", false);
+            if (!state.path.empty()) hiddenStates.push_back(std::move(state));
+        }
+    }
+    DesktopIconVisibility::LoadStates(std::move(hiddenStates));
 
     if (j.contains("fences") && j["fences"].is_array())
         for (const auto& jf : j["fences"])

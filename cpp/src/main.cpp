@@ -11,6 +11,7 @@
 #include "context_menu.h"
 #include "menu_icons.h"
 #include "config.h"
+#include "desktop_icon_visibility.h"
 #include "resource.h"
 #include <vector>
 #include <memory>
@@ -227,6 +228,8 @@ void ShowTrayMenu(HWND hwnd) {
     AppendMenuW(menu, MF_STRING, 103, g_deskHidden
         ? FenceWindow::Loc(L"Show Desktop Icons", L"显示桌面图标")
         : FenceWindow::Loc(L"Hide Desktop Icons", L"隐藏桌面图标"));
+    AppendMenuW(menu, MF_STRING | (DesktopIconVisibility::HasHidden() ? 0 : MF_GRAYED),
+        104, FenceWindow::Loc(L"Show Selectively Hidden Icons", L"显示选择隐藏的图标"));
 
     // Language is a global setting, so it lives here (tray) rather than in the
     // per-fence appearance panel.
@@ -248,8 +251,9 @@ void ShowTrayMenu(HWND hwnd) {
     AppendMenuW(menu, MF_STRING, 102, FenceWindow::Loc(L"Exit", L"退出"));
 
     // Fluent glyph icons, by menu position (0 New Fence, 1 Hide/Show All
-    // Fences, 2 Hide/Show Desktop Icons, 3 separator, 4 Language ▸,
-    // 5 Start with Windows, 6 Config File Location, 7 separator, 8 Exit).
+    // Fences, 2 Hide/Show Desktop Icons, 3 restore selectively hidden,
+    // 4 separator, 5 Language ▸, 6 Start with Windows, 7 Config File
+    // Location, 8 shortcut, 9 separator, 10 Exit).
     // The set owns the HBITMAPs until the menu interaction below has fully
     // returned (MIIM_BITMAP is by reference).
     GlyphBitmapSet glyphs;
@@ -266,10 +270,11 @@ void ShowTrayMenu(HWND hwnd) {
         icon(0, MenuGlyph::Plus);
         icon(1, g_allHidden ? MenuGlyph::Eye : MenuGlyph::EyeOff);
         icon(2, MenuGlyph::Grid);
-        icon(4, MenuGlyph::Globe);
-        icon(5, MenuGlyph::Rocket);
-        icon(6, MenuGlyph::Folder);
-        icon(8, MenuGlyph::Power);
+        icon(3, MenuGlyph::Eye);
+        icon(5, MenuGlyph::Globe);
+        icon(6, MenuGlyph::Rocket);
+        icon(7, MenuGlyph::Folder);
+        icon(10, MenuGlyph::Power);
     }
 
     SetForegroundWindow(hwnd);
@@ -303,6 +308,9 @@ void ShowTrayMenu(HWND hwnd) {
         Config::MarkDirty();
     } else if (cmd == 103) {
         ToggleDesktopIcons();
+    } else if (cmd == 104) {
+        DesktopIconVisibility::ShowAll();
+        Config::MarkDirty();
     } else if (cmd == 110) {
         FenceWindow::SetLanguage(0);   // English
         Config::MarkDirty();
@@ -363,7 +371,11 @@ static void RebuildFences() {
 }
 
 LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == g_taskbarCreated && g_taskbarCreated) { RebuildFences(); return 0; }
+    if (msg == g_taskbarCreated && g_taskbarCreated) {
+        RebuildFences();
+        DesktopIconVisibility::Apply();
+        return 0;
+    }
     switch (msg) {
     case WM_CREATE: AddTrayIcon(hwnd); return 0;
     case WM_TRAYICON: if (LOWORD(lp) == WM_RBUTTONUP) ShowTrayMenu(hwnd); return 0;
@@ -396,6 +408,10 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (wp == 3) {   // config save debounce (Config::MarkDirty)
             Config::SaveNow();
+            return 0;
+        }
+        if (wp == 4) {   // keep selectively hidden desktop originals parked
+            DesktopIconVisibility::Apply();
             return 0;
         }
         ScanAndConstrainIcons();
@@ -471,6 +487,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // hid them before launching us), park immediately instead of sitting
     // invisible under the hidden list until the first timer-2 tick.
     WatchDesktopIconVisibility();
+    DesktopIconVisibility::Apply();
 
     // ScanAndConstrainIcons disabled for now — cross-process SendMessage
     // to explorer's ListView can cause deadlocks.
@@ -482,6 +499,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // and every fence re-adopts it. Each fence early-outs unless the size
     // actually changed.
     SetTimer(g_owner, 2, 300, nullptr);
+    SetTimer(g_owner, 4, 3000, nullptr);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {
