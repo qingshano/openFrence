@@ -19,6 +19,7 @@ struct FenceData {
     std::wstring sourceFolder;
     int sortCol = 0;        // 0=Name, 1=DateModified, 2=Size, 3=Type
     bool sortAsc = true;
+    bool hideDesktopOriginals = false; // hide desktop copies of every icon in this fence
 };
 
 class FenceWindow {
@@ -83,6 +84,8 @@ public:
     void RestoreGridLayout();
     void FitToListHeight();     // resize window to show all icons in list mode
     void FitToContent();        // one-click width/height fit for the current icons
+    bool HidesDesktopOriginals() const { return m_hideDesktopOriginals; }
+    void SetHideDesktopOriginals(bool hide);
 
     // Folder mapping: replace fence contents with the files inside a folder,
     // and watch it for live updates.
@@ -150,6 +153,8 @@ private:
     std::unique_ptr<RenderContext> m_render;
     std::wstring m_title, m_id;
     std::vector<IconEntry> m_icons;
+    bool m_hideDesktopOriginals = false;
+    void SyncDesktopOriginalVisibility();
     int m_x = 0, m_y = 0;
 
     bool m_dragOver = false;

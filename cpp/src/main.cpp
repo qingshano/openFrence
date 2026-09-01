@@ -417,6 +417,7 @@ LRESULT CALLBACK OwnerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         auto it = std::find_if(g_fences.begin(), g_fences.end(),
             [target](auto& f) { return f->Hwnd() == target; });
         if (it != g_fences.end()) {
+            (*it)->SetHideDesktopOriginals(false);
             g_fences.erase(it);
             Config::MarkDirty();
         }

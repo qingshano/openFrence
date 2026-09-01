@@ -223,7 +223,8 @@ public:
 };
 
 FenceWindow::FenceWindow(const FenceData& data)
-    : m_title(data.title), m_id(data.id), m_x(data.x), m_y(data.y)
+    : m_title(data.title), m_id(data.id), m_x(data.x), m_y(data.y),
+      m_hideDesktopOriginals(data.hideDesktopOriginals)
 {
     m_render = std::make_unique<RenderContext>(data.w, data.h);
 
@@ -319,8 +320,26 @@ void FenceWindow::Redraw() {
 }
 
 void FenceWindow::SetIcons(const std::vector<IconEntry>& entries) {
+    if (m_hideDesktopOriginals) {
+        for (const auto& icon : m_icons)
+            DesktopIconVisibility::SetHidden(icon.name, icon.path, false);
+    }
     m_icons = entries;
+    SyncDesktopOriginalVisibility();
     Redraw();
+}
+
+void FenceWindow::SyncDesktopOriginalVisibility() {
+    for (const auto& icon : m_icons)
+        DesktopIconVisibility::SetHidden(icon.name, icon.path, m_hideDesktopOriginals);
+    DesktopIconVisibility::Apply();
+}
+
+void FenceWindow::SetHideDesktopOriginals(bool hide) {
+    if (m_hideDesktopOriginals == hide) return;
+    m_hideDesktopOriginals = hide;
+    SyncDesktopOriginalVisibility();
+    Config::MarkDirty();
 }
 
 void FenceWindow::AddIcon(const std::wstring& name, const std::wstring& path,
@@ -343,6 +362,8 @@ void FenceWindow::AddIcon(const std::wstring& name, const std::wstring& path,
         if (lstrcmpiW(m_icons[i].path.c_str(), path.c_str()) == 0) {
             PushOccupantOf(cell, { i });
             PlaceIconAt(m_icons[i], cell);
+            DesktopIconVisibility::SetHidden(name, path, m_hideDesktopOriginals);
+            DesktopIconVisibility::Apply();
             Redraw();
             Config::MarkDirty();
             return;
@@ -354,6 +375,8 @@ void FenceWindow::AddIcon(const std::wstring& name, const std::wstring& path,
     e.path = path;
     PlaceIconAt(e, FindFreeCell(cell, OccupiedCells({})));
     m_icons.push_back(std::move(e));
+    DesktopIconVisibility::SetHidden(name, path, m_hideDesktopOriginals);
+    DesktopIconVisibility::Apply();
     Redraw();
     Config::MarkDirty();
 }
@@ -986,7 +1009,8 @@ void FenceWindow::CaptureBackdrop() {
 }
 
 FenceData FenceWindow::GetData() const {
-    return { m_id, m_title, m_x, m_y, (int)m_render->Width(), (int)m_render->Height(), true, m_sourceFolder, m_sortColumn, m_sortAscending };
+    return { m_id, m_title, m_x, m_y, (int)m_render->Width(), (int)m_render->Height(),
+             true, m_sourceFolder, m_sortColumn, m_sortAscending, m_hideDesktopOriginals };
 }
 
 // ── Sort ──
@@ -1231,7 +1255,7 @@ void FenceWindow::EnumerateSourceFolder(bool keepPositions) {
         FindClose(hFind);
     }
 
-    m_icons = std::move(newIcons);
+    SetIcons(newIcons);
     ApplySort();
     if (SearchActive()) RebuildFilter();
     else              RelayoutIcons();
@@ -1312,9 +1336,15 @@ void FenceWindow::ExitIconRename(bool commit) {
                 std::wstring newPath = oldPath.substr(0, slash + 1) + newName;
                 NewDbg(L"MoveFileW \"%s\" -> \"%s\"", oldPath.c_str(), newPath.c_str());
                 if (MoveFileW(oldPath.c_str(), newPath.c_str())) {
+                    std::wstring oldName = m_icons[idx].name;
                     m_icons[idx].name = newName;
                     m_icons[idx].path = newPath;
                     m_icons[idx].ext = PathFindExtensionW(newPath.c_str());
+                    if (m_hideDesktopOriginals) {
+                        DesktopIconVisibility::SetHidden(oldName, oldPath, false);
+                        DesktopIconVisibility::SetHidden(newName, newPath, true);
+                        DesktopIconVisibility::Apply();
+                    }
                     for (auto& p : m_selectedPaths)
                         if (p == oldPath) p = newPath;
                     // Mapped fences re-enumerate via the change watcher;
@@ -1465,7 +1495,7 @@ static HRESULT CreateNewMenuHandler(PCIDLIST_ABSOLUTE pidlFolder, IContextMenu**
 
 // The fence-only verb is placed far above the shell's command-id range.
 static const int kCmdRemoveFromFence = 0x8001;
-static const int kCmdToggleDesktopOriginal = 0x8002;
+static const int kCmdToggleFenceDesktopOriginals = 0x8002;
 static const int kCmdSortByName  = 0x8010;
 static const int kCmdSortByDate  = 0x8011;
 static const int kCmdSortByType  = 0x8012;
@@ -1481,7 +1511,7 @@ static const int kCmdSortDesc    = 0x8015;
 // the fence's in-place rename instead of handing it to Explorer).
 static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
                                 const std::wstring& displayName, POINT ptScreen,
-                                bool showDesktopOriginal, int selectionCount,
+                                bool showFenceDesktopOriginals,
                                 bool& invoked, bool& removeChosen,
                                 bool& renameChosen, bool& visibilityChosen) {
     invoked = removeChosen = renameChosen = visibilityChosen = false;
@@ -1524,17 +1554,10 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
     std::wstring rm = std::wstring(FenceWindow::Loc(L"Remove from fence", L"从围栏移除")) +
                       L"  \"" + displayName + L"\"";
     AppendMenuW(menu, MF_STRING, kCmdRemoveFromFence, rm.c_str());
-    std::wstring visibilityText;
-    if (showDesktopOriginal) {
-        visibilityText = selectionCount > 1
-            ? FenceWindow::Loc(L"Show selected desktop originals", L"显示所选桌面原图标")
-            : FenceWindow::Loc(L"Show desktop original", L"显示桌面原图标");
-    } else {
-        visibilityText = selectionCount > 1
-            ? FenceWindow::Loc(L"Hide selected desktop originals", L"隐藏所选桌面原图标")
-            : FenceWindow::Loc(L"Hide desktop original", L"隐藏桌面原图标");
-    }
-    AppendMenuW(menu, MF_STRING, kCmdToggleDesktopOriginal, visibilityText.c_str());
+    AppendMenuW(menu, MF_STRING, kCmdToggleFenceDesktopOriginals,
+        showFenceDesktopOriginals
+            ? FenceWindow::Loc(L"Show desktop icons in this fence", L"显示围栏内桌面图标")
+            : FenceWindow::Loc(L"Hide desktop icons in this fence", L"隐藏围栏内桌面图标"));
 
     // Win11 look first: we repaint the (identical) HMENU contents ourselves,
     // because Explorer's XAML menu cannot be obtained cross-process. If the
@@ -1552,7 +1575,7 @@ static bool RunShellContextMenu(HWND hwnd, const std::wstring& path,
         removeChosen = true;
         return true;
     }
-    if (idCmd == kCmdToggleDesktopOriginal) {
+    if (idCmd == kCmdToggleFenceDesktopOriginals) {
         visibilityChosen = true;
         return true;
     }
@@ -2137,6 +2160,11 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         // Remove icon `idx`, repairing selection/hover bookkeeping.
         auto eraseIcon = [&](int idx) {
             if (!self || idx < 0 || idx >= (int)self->m_icons.size()) return;
+            if (self->m_hideDesktopOriginals) {
+                const auto& icon = self->m_icons[idx];
+                DesktopIconVisibility::SetHidden(icon.name, icon.path, false);
+                DesktopIconVisibility::Apply();
+            }
             // Drop the removed path from the selection set so no entry
             // dangles pointing at a dead icon.
             auto& sel = self->m_selectedPaths;
@@ -2150,21 +2178,9 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             Config::MarkDirty();
         };
 
-        std::vector<IconEntry> selectedIcons;
-        if (self && iconHit >= 0) {
-            for (const auto& icon : self->m_icons)
-                if (self->IsPathSelected(icon.path)) selectedIcons.push_back(icon);
-        }
-        bool showDesktopOriginal = !selectedIcons.empty() &&
-            std::all_of(selectedIcons.begin(), selectedIcons.end(), [](const IconEntry& icon) {
-                return DesktopIconVisibility::IsHidden(icon.path);
-            });
-        auto toggleDesktopOriginals = [&]() {
-            bool hide = !showDesktopOriginal;
-            for (const auto& icon : selectedIcons)
-                DesktopIconVisibility::SetHidden(icon.name, icon.path, hide);
-            DesktopIconVisibility::Apply();
-            Config::MarkDirty();
+        bool showFenceDesktopOriginals = self && self->HidesDesktopOriginals();
+        auto toggleFenceDesktopOriginals = [&]() {
+            if (self) self->SetHideDesktopOriginals(!self->HidesDesktopOriginals());
         };
 
         // Icon → show the real Explorer context menu (Open / Cut / Copy /
@@ -2174,11 +2190,11 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             bool visibilityChosen = false;
             if (RunShellContextMenu(hwnd, self->m_icons[iconHit].path,
                                     self->m_icons[iconHit].name, pt,
-                                    showDesktopOriginal, (int)selectedIcons.size(),
+                                    showFenceDesktopOriginals,
                                     invoked, removeChosen, renameChosen,
                                     visibilityChosen)) {
                 if (visibilityChosen) {
-                    toggleDesktopOriginals();
+                    toggleFenceDesktopOriginals();
                 } else if (renameChosen) {
                     // Rename right here in the fence instead of letting the
                     // shell rename the desktop/Explorer copy.
@@ -2204,15 +2220,15 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             std::wstring rm = std::wstring(Loc(L"Remove", L"移除")) + L" \"" +
                               self->m_icons[iconHit].name + L"\"";
             AppendMenuW(menu, MF_STRING, 3, rm.c_str());
-            AppendMenuW(menu, MF_STRING, 8,
-                showDesktopOriginal
-                    ? Loc(L"Show desktop original", L"显示桌面原图标")
-                    : Loc(L"Hide desktop original", L"隐藏桌面原图标"));
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         }
 
         AppendMenuW(menu, MF_STRING, 1, Loc(L"Rename", L"重命名"));
         AppendMenuW(menu, MF_STRING, 7, Loc(L"Auto fit", L"一键自适应"));
+        AppendMenuW(menu, MF_STRING, 8,
+            showFenceDesktopOriginals
+                ? Loc(L"Show desktop icons in this fence", L"显示围栏内桌面图标")
+                : Loc(L"Hide desktop icons in this fence", L"隐藏围栏内桌面图标"));
         AppendMenuW(menu, MF_STRING, 4, Loc(L"Appearance Settings...", L"外观设置..."));
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -2303,7 +2319,7 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 SetMenuItemInfoW(menu, id, FALSE, &mii);
             };
             if (iconHit >= 0) icon(3, MenuGlyph::Remove);
-            if (iconHit >= 0) icon(8, showDesktopOriginal ? MenuGlyph::Eye : MenuGlyph::EyeOff);
+            icon(8, showFenceDesktopOriginals ? MenuGlyph::Eye : MenuGlyph::EyeOff);
             icon(1, MenuGlyph::Pencil);    // Rename
             icon(7, MenuGlyph::Grid);      // Auto fit
             icon(4, MenuGlyph::Sliders);   // Appearance Settings
@@ -2339,7 +2355,7 @@ LRESULT CALLBACK FenceWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             switch (cmd) {
             case 1: self->EnterRename(); break;
             case 7: self->FitToContent(); break;
-            case 8: toggleDesktopOriginals(); break;
+            case 8: toggleFenceDesktopOriginals(); break;
             case 2:
                 if (s_owner)
                     PostMessage(s_owner, WM_FENCE_DELETE, (WPARAM)hwnd, 0);

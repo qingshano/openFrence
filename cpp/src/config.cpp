@@ -63,6 +63,7 @@ json SaveFence(FenceWindow& f) {
     jf["source"]    = ToUtf8(d.sourceFolder);
     jf["sortCol"]   = d.sortCol;
     jf["sortAsc"]   = d.sortAsc;
+    jf["hideDesktopOriginals"] = d.hideDesktopOriginals;
     jf["titleH"]    = app.titleH;   // physical px (appearance is pre-scaled)
     jf["fontSize"]  = app.fontSize;
     jf["fontName"]  = ToUtf8(app.fontName);
@@ -87,6 +88,7 @@ void LoadFence(const json& jf) {
     fd.y     = jf.value("y", 0);
     fd.w     = jf.value("w", 0);
     fd.h     = jf.value("h", 0);
+    fd.hideDesktopOriginals = jf.value("hideDesktopOriginals", false);
     if (fd.w < 40 || fd.h < 20) return;   // degenerate entry — skip
 
     auto f = std::make_unique<FenceWindow>(fd);
