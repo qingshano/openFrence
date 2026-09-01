@@ -333,6 +333,10 @@ void FenceWindow::SyncDesktopOriginalVisibility() {
     for (const auto& icon : m_icons)
         DesktopIconVisibility::SetHidden(icon.name, icon.path, m_hideDesktopOriginals);
     DesktopIconVisibility::Apply();
+    // Apply may have captured original file attributes for the first time.
+    // Persist them after the load/add burst so "show" can restore exactly
+    // even if the process is terminated instead of exiting normally.
+    Config::MarkDirty();
 }
 
 void FenceWindow::SetHideDesktopOriginals(bool hide) {
