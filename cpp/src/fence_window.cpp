@@ -223,8 +223,8 @@ public:
 };
 
 FenceWindow::FenceWindow(const FenceData& data)
-    : m_title(data.title), m_id(data.id), m_x(data.x), m_y(data.y),
-      m_hideDesktopOriginals(data.hideDesktopOriginals)
+    : m_title(data.title), m_id(data.id),
+      m_hideDesktopOriginals(data.hideDesktopOriginals), m_x(data.x), m_y(data.y)
 {
     m_render = std::make_unique<RenderContext>(data.w, data.h);
 

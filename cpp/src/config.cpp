@@ -244,11 +244,37 @@ bool LoadApp() {
             if (!state.path.empty()) hiddenStates.push_back(std::move(state));
         }
     }
+    // Keep a copy for migration. Older builds exposed per-icon visibility;
+    // the current UI owns this state per fence instead.
+    std::vector<HiddenDesktopIconState> legacyHiddenStates = hiddenStates;
     DesktopIconVisibility::LoadStates(std::move(hiddenStates));
 
     if (j.contains("fences") && j["fences"].is_array())
         for (const auto& jf : j["fences"])
             LoadFence(jf);
+
+    // Restore and discard every legacy per-icon entry that is not covered by
+    // a fence whose fence-level hide switch is enabled. Hidden fences already
+    // re-asserted their own entries while LoadFence populated their icons.
+    for (const auto& state : legacyHiddenStates) {
+        bool ownedByHiddenFence = false;
+        for (const auto& fence : g_fences) {
+            if (!fence->HidesDesktopOriginals()) continue;
+            for (const auto& icon : fence->Icons()) {
+                if (lstrcmpiW(icon.path.c_str(), state.path.c_str()) == 0) {
+                    ownedByHiddenFence = true;
+                    break;
+                }
+            }
+            if (ownedByHiddenFence) break;
+        }
+        if (!ownedByHiddenFence)
+            DesktopIconVisibility::SetHidden(state.name, state.path, false);
+    }
+    if (!legacyHiddenStates.empty()) {
+        DesktopIconVisibility::Apply();
+        MarkDirty();
+    }
 
     // An empty array is a legitimate state (the user deleted every fence) —
     // only a MISSING file triggers the defaults, so honor it.
