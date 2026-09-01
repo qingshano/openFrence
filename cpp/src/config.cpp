@@ -170,6 +170,8 @@ bool SaveNow() {
             { "path", ToUtf8(state.path) },
             { "x", state.x }, { "y", state.y },
             { "hasPosition", state.hasPosition },
+            { "originalAttributes", state.originalAttributes },
+            { "hasOriginalAttributes", state.hasOriginalAttributes },
         });
     }
     j["hiddenDesktopIcons"] = std::move(hiddenDesktopIcons);
@@ -241,6 +243,8 @@ bool LoadApp() {
             state.x = item.value("x", 0);
             state.y = item.value("y", 0);
             state.hasPosition = item.value("hasPosition", false);
+            state.originalAttributes = item.value("originalAttributes", 0ul);
+            state.hasOriginalAttributes = item.value("hasOriginalAttributes", false);
             if (!state.path.empty()) hiddenStates.push_back(std::move(state));
         }
     }

@@ -8,6 +8,8 @@ struct HiddenDesktopIconState {
     int x = 0;
     int y = 0;
     bool hasPosition = false;
+    unsigned long originalAttributes = 0;
+    bool hasOriginalAttributes = false;
     bool hidden = true;
 };
 
